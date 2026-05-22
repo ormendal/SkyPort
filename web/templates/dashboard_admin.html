@@ -1,0 +1,839 @@
+{% extends "base.html" %}
+{% block title %}Statistiche{% endblock %}
+
+{% block content %}
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">
+        <i class="bi bi-bar-chart-fill" aria-hidden="true"></i> Panoramica sistema
+      </h1>
+      <p class="page-subtitle">Benvenuto, <strong>{{ session.username }}</strong></p>
+    </div>
+    <button class="btn-action" onclick="caricaTutto()" aria-label="Aggiorna tutti i dati">
+      <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Aggiorna
+    </button>
+  </div>
+
+  <!-- Stat cards 3×2 -->
+  <div id="stats-grid"
+       style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-6);margin-bottom:var(--sp-12);"
+       aria-live="polite">
+    {% for _ in range(6) %}
+    <div class="stat-card">
+      <div class="skeleton" style="width:22px;height:22px;margin-bottom:12px;border-radius:4px;">&nbsp;</div>
+      <div class="skeleton" style="width:60px;height:36px;margin-bottom:6px;">&nbsp;</div>
+      <div class="skeleton" style="width:100px;height:12px;">&nbsp;</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Breakdown tables -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-8);">
+    <div>
+      <h2 class="section-label">
+        <i class="bi bi-ticket-perforated" aria-hidden="true"></i> Prenotazioni per stato
+      </h2>
+      <div class="app-table-wrap">
+        <table class="app-table" aria-label="Prenotazioni per stato">
+          <thead><tr><th scope="col">Stato</th><th scope="col">Numero</th></tr></thead>
+          <tbody id="pren-breakdown-body">
+            <tr><td colspan="2" style="padding:20px;text-align:center;">
+              <span class="skeleton" style="width:120px;height:14px;">&nbsp;</span>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h2 class="section-label">
+        <i class="bi bi-airplane" aria-hidden="true"></i> Voli per stato
+      </h2>
+      <div class="app-table-wrap">
+        <table class="app-table" aria-label="Voli per stato">
+          <thead><tr><th scope="col">Stato</th><th scope="col">Numero</th></tr></thead>
+          <tbody id="voli-breakdown-body">
+            <tr><td colspan="2" style="padding:20px;text-align:center;">
+              <span class="skeleton" style="width:120px;height:14px;">&nbsp;</span>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-label" style="margin-top:var(--sp-8);">
+        <i class="bi bi-sign-stop" aria-hidden="true"></i> Gate per stato
+      </h2>
+      <div class="app-table-wrap">
+        <table class="app-table" aria-label="Gate per stato">
+          <thead><tr><th scope="col">Stato</th><th scope="col">Numero</th></tr></thead>
+          <tbody id="gate-breakdown-body">
+            <tr><td colspan="2" style="padding:20px;text-align:center;">
+              <span class="skeleton" style="width:120px;height:14px;">&nbsp;</span>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Storico Voli ── -->
+  <div class="admin-section">
+    <div class="page-header" style="margin-bottom:var(--sp-4);">
+      <h2 class="section-label" style="margin:0;">
+        <i class="bi bi-clock-history" aria-hidden="true"></i> Storico voli
+      </h2>
+    </div>
+
+    <!-- Filtri -->
+    <form id="filtri-voli" onsubmit="caricaStorico(event)" novalidate
+          aria-label="Filtri storico voli"
+          style="display:flex;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-4);align-items:flex-end;">
+      <div style="min-width:140px;">
+        <label class="app-label" for="f-stato-volo">Stato</label>
+        <select id="f-stato-volo" class="app-select">
+          <option value="">Tutti</option>
+          <option value="programmato">Programmato</option>
+          <option value="partito">Partito</option>
+          <option value="arrivato">Arrivato</option>
+        </select>
+      </div>
+      <div style="min-width:200px;">
+        <label class="app-label" for="f-compagnia-nome">Compagnia (nome)</label>
+        <input id="f-compagnia-nome" class="app-input" type="text" placeholder="es. Air Dolomiti"
+               style="font-size:14px;">
+      </div>
+      <div style="min-width:160px;">
+        <label class="app-label" for="f-data-volo">Data partenza</label>
+        <input id="f-data-volo" class="app-input" type="date" style="font-size:14px;">
+      </div>
+      <button type="submit" class="btn-cta">
+        <i class="bi bi-filter" aria-hidden="true"></i> Filtra
+      </button>
+      <button type="button" class="btn-ghost" onclick="resetFiltri()">Azzera</button>
+    </form>
+
+    <div class="app-table-wrap">
+      <table class="app-table" id="storico-table" aria-label="Storico tutti i voli">
+        <thead>
+          <tr>
+            <th scope="col" class="sortable-th" data-col="codice_volo" onclick="ordinaStorico('codice_volo')">
+              Codice <span class="sort-icon" aria-hidden="true"></span>
+            </th>
+            <th scope="col">Compagnia</th>
+            <th scope="col">Tratta</th>
+            <th scope="col" class="sortable-th" data-col="data_ora_partenza" onclick="ordinaStorico('data_ora_partenza')">
+              Partenza <span class="sort-icon" aria-hidden="true"></span>
+            </th>
+            <th scope="col">Arrivo</th>
+            <th scope="col">Gate</th>
+            <th scope="col">Occupati/Tot.</th>
+            <th scope="col">Stato</th>
+          </tr>
+        </thead>
+        <tbody id="storico-body">
+          <tr><td colspan="8" style="padding:32px;text-align:center;">
+            <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Gestione Utenti ── -->
+  <div class="admin-section">
+    <div class="page-header" style="margin-bottom:var(--sp-4);">
+      <h2 class="section-label" style="margin:0;">
+        <i class="bi bi-people-fill" aria-hidden="true"></i> Gestione utenti
+      </h2>
+    </div>
+
+    <div class="app-table-wrap">
+      <table class="app-table" id="utenti-table" aria-label="Elenco utenti">
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Username</th>
+            <th scope="col">Ruolo</th>
+            <th scope="col">Riferimento</th>
+            <th scope="col">Stato</th>
+            <th scope="col"><span class="visually-hidden">Azioni</span></th>
+          </tr>
+        </thead>
+        <tbody id="utenti-body">
+          <tr><td colspan="6" style="padding:32px;text-align:center;">
+            <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Backup e Ripristino ── -->
+  <div class="admin-section">
+    <div class="page-header" style="margin-bottom:var(--sp-4);">
+      <h2 class="section-label" style="margin:0;">
+        <i class="bi bi-database-fill-gear" aria-hidden="true"></i> Backup e ripristino
+      </h2>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-6);">
+      <!-- Download backup -->
+      <div class="backup-card">
+        <div class="backup-icon"><i class="bi bi-cloud-arrow-down-fill" aria-hidden="true"></i></div>
+        <div>
+          <p style="font-family:var(--font-display);font-weight:600;font-size:16px;margin:0 0 4px;">
+            Scarica backup
+          </p>
+          <p class="text-sm text-muted" style="margin:0;">
+            Esporta il database corrente come file <code>.db</code>.
+          </p>
+        </div>
+        <a id="btn-backup" class="btn-cta" href="/api/admin/backup">
+          <i class="bi bi-download" aria-hidden="true"></i> Scarica ora
+        </a>
+      </div>
+
+      <!-- Ripristino -->
+      <div class="backup-card">
+        <div class="backup-icon" style="color:var(--c-warn);">
+          <i class="bi bi-cloud-arrow-up-fill" aria-hidden="true"></i>
+        </div>
+        <div>
+          <p style="font-family:var(--font-display);font-weight:600;font-size:16px;margin:0 0 4px;">
+            Ripristina database
+          </p>
+          <p class="text-sm text-muted" style="margin:0;">
+            Carica un file <code>.db</code> precedentemente scaricato. Il database corrente
+            verrà sostituito.
+          </p>
+        </div>
+        <div style="display:flex;gap:var(--sp-3);align-items:center;">
+          <input id="inp-backup-file" type="file" accept=".db"
+                 onchange="onBackupFileSelected()"
+                 style="font-size:13px;color:var(--c-muted);">
+          <button class="btn-action" id="btn-restore" disabled
+                  onclick="openModal('modal-restore')">
+            <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Ripristina
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Log di sistema ── -->
+  <div class="admin-section">
+    <div class="page-header" style="margin-bottom:var(--sp-4);">
+      <h2 class="section-label" style="margin:0;">
+        <i class="bi bi-journal-text" aria-hidden="true"></i> Log di sistema
+      </h2>
+    </div>
+
+    <form id="filtri-log" onsubmit="caricaLog(event)" novalidate
+          aria-label="Filtri log"
+          style="display:flex;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-4);align-items:flex-end;">
+      <div style="min-width:160px;">
+        <label class="app-label" for="f-log-azione">Azione</label>
+        <input id="f-log-azione" class="app-input" type="text" placeholder="es. login_success"
+               style="font-size:13px;">
+      </div>
+      <div style="min-width:120px;">
+        <label class="app-label" for="f-log-da">Da</label>
+        <input id="f-log-da" class="app-input" type="date" style="font-size:13px;">
+      </div>
+      <div style="min-width:120px;">
+        <label class="app-label" for="f-log-a">A</label>
+        <input id="f-log-a" class="app-input" type="date" style="font-size:13px;">
+      </div>
+      <div style="min-width:80px;">
+        <label class="app-label" for="f-log-limite">Righe</label>
+        <select id="f-log-limite" class="app-select" style="font-size:13px;">
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <button type="submit" class="btn-cta">
+        <i class="bi bi-filter" aria-hidden="true"></i> Filtra
+      </button>
+      <button type="button" class="btn-ghost" onclick="resetLog()">Azzera</button>
+    </form>
+
+    <div class="app-table-wrap">
+      <table class="app-table" id="log-table" aria-label="Log di sistema">
+        <thead>
+          <tr>
+            <th scope="col">Timestamp</th>
+            <th scope="col">Utente</th>
+            <th scope="col">Azione</th>
+            <th scope="col">Dettagli</th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr><td colspan="4" style="padding:32px;text-align:center;">
+            <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Aeroporti ── -->
+  <div class="admin-section">
+    <div class="page-header" style="margin-bottom:var(--sp-4);">
+      <h2 class="section-label" style="margin:0;">
+        <i class="bi bi-geo-alt-fill" aria-hidden="true"></i> Aeroporti
+      </h2>
+      <button class="btn-cta" onclick="openModal('modal-aeroporto')" aria-haspopup="dialog">
+        <i class="bi bi-plus-lg" aria-hidden="true"></i> Aggiungi aeroporto
+      </button>
+    </div>
+
+    <div id="aeroporti-info" class="info-banner" role="note"
+         style="display:none;margin-bottom:var(--sp-4);">
+      <i class="bi bi-info-circle" aria-hidden="true"></i>
+      Gli aeroporti registrati qui vengono mostrati sulla mappa interattiva nella home,
+      collegati ai voli attivi (programmato o partito).
+    </div>
+
+    <div class="app-table-wrap">
+      <table class="app-table" id="aeroporti-table" aria-label="Elenco aeroporti">
+        <thead>
+          <tr>
+            <th scope="col">Codice IATA</th>
+            <th scope="col">Nome</th>
+            <th scope="col">Latitudine</th>
+            <th scope="col">Longitudine</th>
+          </tr>
+        </thead>
+        <tbody id="aeroporti-body">
+          <tr><td colspan="4" style="padding:32px;text-align:center;">
+            <span class="skeleton" style="width:160px;height:16px;">&nbsp;</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal: Conferma ripristino DB -->
+<div id="modal-restore" class="modal-overlay" role="alertdialog" aria-modal="true"
+     aria-labelledby="restore-title" aria-describedby="restore-desc">
+  <div class="modal-panel" style="max-width:460px;">
+    <div class="modal-header">
+      <h2 id="restore-title" style="color:var(--c-danger);">
+        <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i> Conferma ripristino
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-restore')" aria-label="Annulla">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p id="restore-desc" style="margin:0 0 var(--sp-4);">
+        Stai per sostituire l'intero database con il file selezionato.
+        <strong>Questa operazione è irreversibile</strong> e sovrascriverà tutti i dati correnti.
+      </p>
+      <p class="text-sm text-muted" style="margin:0;">File: <strong id="restore-filename">—</strong></p>
+      <div id="restore-error" class="form-error-msg" role="alert" style="display:none;margin-top:var(--sp-4);"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-conferma-restore" class="btn-danger-sm" style="padding:8px 16px;"
+              onclick="confermRestore()">
+        <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Ripristina database
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-restore')">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Conferma elimina utente -->
+<div id="modal-elimina-utente" class="modal-overlay" role="alertdialog" aria-modal="true"
+     aria-labelledby="del-utente-title">
+  <div class="modal-panel" style="max-width:440px;">
+    <div class="modal-header">
+      <h2 id="del-utente-title" style="color:var(--c-danger);">
+        <i class="bi bi-person-x-fill" aria-hidden="true"></i> Elimina utente
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-elimina-utente')" aria-label="Annulla">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0;">
+        Eliminare l'utente <strong id="del-utente-username">—</strong>?
+        <br><span class="text-sm text-muted">L'operazione fallisce se l'utente ha dati collegati attivi.</span>
+      </p>
+      <div id="del-utente-error" class="form-error-msg" role="alert" style="display:none;margin-top:var(--sp-4);"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-conferma-del-utente" class="btn-danger-sm" style="padding:8px 16px;"
+              onclick="confermEliminaUtente()">
+        <i class="bi bi-trash3" aria-hidden="true"></i> Elimina
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-elimina-utente')">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Aggiungi aeroporto -->
+<div id="modal-aeroporto" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="modal-aeroporto-title">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h2 id="modal-aeroporto-title">
+        <i class="bi bi-geo-alt-fill" aria-hidden="true"></i> Nuovo aeroporto
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-aeroporto')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <form id="form-aeroporto" onsubmit="salvaAeroporto(event)" novalidate>
+      <div class="modal-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div class="form-group">
+            <label class="app-label" for="a-codice">Codice IATA <abbr title="3 lettere maiuscole">*</abbr></label>
+            <input id="a-codice" class="app-input" type="text" required
+                   maxlength="3" placeholder="LGW" style="text-transform:uppercase;">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="a-nome">Nome aeroporto</label>
+            <input id="a-nome" class="app-input" type="text" placeholder="Londra Gatwick">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div class="form-group">
+            <label class="app-label" for="a-lat">Latitudine <abbr title="da -90 a +90">*</abbr></label>
+            <input id="a-lat" class="app-input" type="number" required
+                   step="0.0001" min="-90" max="90" placeholder="51.1537">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="a-lon">Longitudine <abbr title="da -180 a +180">*</abbr></label>
+            <input id="a-lon" class="app-input" type="number" required
+                   step="0.0001" min="-180" max="180" placeholder="-0.1821">
+          </div>
+        </div>
+        <div id="aeroporto-error" class="form-error-msg" role="alert" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn-cta">
+          <i class="bi bi-check-lg" aria-hidden="true"></i> Salva
+        </button>
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-aeroporto')">Annulla</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ─── Helpers ─── */
+function fmtDt(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'numeric' }) +
+         ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+}
+
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+/* ─── Stats ─── */
+const STAT_CONFIG = [
+  { key: s => s.voli.totale,          icon: 'bi-airplane',           label: 'Voli totali'       },
+  { key: s => s.prenotazioni.totale,  icon: 'bi-ticket-perforated',  label: 'Prenotazioni'      },
+  { key: s => s.passeggeri,           icon: 'bi-people-fill',        label: 'Passeggeri'        },
+  { key: s => s.compagnie,            icon: 'bi-building',           label: 'Compagnie aeree'   },
+  { key: s => s.gate.totale,          icon: 'bi-sign-stop',          label: 'Gate'              },
+  { key: s => s.carte_imbarco,        icon: 'bi-card-checklist',     label: "Carte d'imbarco"   },
+];
+
+function renderStats(s) {
+  document.getElementById('stats-grid').innerHTML = STAT_CONFIG.map(cfg => `
+    <div class="stat-card">
+      <div class="stat-icon"><i class="bi ${cfg.icon}" aria-hidden="true"></i></div>
+      <div class="stat-value">${cfg.key(s)}</div>
+      <div class="stat-label">${cfg.label}</div>
+    </div>`).join('');
+
+  const badgeRow = r =>
+    `<tr>
+       <td><span class="badge-stato badge-${r.stato}">${r.stato}</span></td>
+       <td><strong>${r.numero}</strong></td>
+     </tr>`;
+
+  const vuoto = '<tr><td colspan="2" style="padding:16px;text-align:center;color:var(--c-muted);">—</td></tr>';
+
+  document.getElementById('pren-breakdown-body').innerHTML =
+    s.prenotazioni.per_stato.map(badgeRow).join('') || vuoto;
+  document.getElementById('voli-breakdown-body').innerHTML =
+    s.voli.per_stato.map(badgeRow).join('') || vuoto;
+  document.getElementById('gate-breakdown-body').innerHTML =
+    s.gate.per_stato.map(badgeRow).join('') || vuoto;
+}
+
+async function caricaStats() {
+  const { ok, data } = await apiFetch('/api/admin/stats');
+  if (ok) renderStats(data);
+  else showToast('Errore nel caricamento delle statistiche.', 'error');
+}
+
+/* ─── Storico voli ─── */
+let _storicoDati = [];
+let _sortCol = 'data_ora_partenza';
+let _sortAsc  = false;
+
+function renderStorico(voli) {
+  const tbody = document.getElementById('storico-body');
+  if (voli.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="padding:32px;text-align:center;color:var(--c-muted);">
+      Nessun volo trovato per i criteri selezionati.
+    </td></tr>`;
+    return;
+  }
+  tbody.innerHTML = voli.map(v => `<tr>
+    <td><span class="codice-volo">${v.codice_volo}</span></td>
+    <td>${v.compagnia}</td>
+    <td><strong>${v.origine}</strong> → <strong>${v.destinazione}</strong></td>
+    <td style="white-space:nowrap;">${fmtDt(v.data_ora_partenza)}</td>
+    <td style="white-space:nowrap;">${fmtDt(v.data_ora_arrivo)}</td>
+    <td>${v.gate || '—'}</td>
+    <td>${v.posti_occupati}/${v.posti_totali}</td>
+    <td><span class="badge-stato badge-${v.stato}">${v.stato}</span></td>
+  </tr>`).join('');
+}
+
+function ordinaStorico(col) {
+  if (_sortCol === col) {
+    _sortAsc = !_sortAsc;
+  } else {
+    _sortCol = col;
+    _sortAsc = true;
+  }
+
+  /* Aggiorna icone header */
+  document.querySelectorAll('.sortable-th').forEach(th => {
+    th.classList.remove('asc', 'desc');
+    if (th.dataset.col === col) th.classList.add(_sortAsc ? 'asc' : 'desc');
+  });
+
+  const filtrati = filtraStorico(_storicoDati);
+  const ordinati = [...filtrati].sort((a, b) => {
+    const va = a[col] ?? '';
+    const vb = b[col] ?? '';
+    return _sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+  });
+  renderStorico(ordinati);
+}
+
+function filtraStorico(dati) {
+  const compagniaFiltro = document.getElementById('f-compagnia-nome').value.trim().toLowerCase();
+  if (!compagniaFiltro) return dati;
+  return dati.filter(v => v.compagnia.toLowerCase().includes(compagniaFiltro));
+}
+
+async function caricaStorico(evt) {
+  if (evt) evt.preventDefault();
+
+  const stato = document.getElementById('f-stato-volo').value;
+  const data  = document.getElementById('f-data-volo').value;
+
+  const params = new URLSearchParams();
+  if (stato) params.set('stato', stato);
+  if (data)  params.set('data', data);
+
+  document.getElementById('storico-body').innerHTML =
+    `<tr><td colspan="8" style="padding:32px;text-align:center;">
+      <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+    </td></tr>`;
+
+  const { ok, data: voli } = await apiFetch('/api/admin/voli?' + params.toString());
+  if (!ok) { showToast('Errore nel caricamento dello storico.', 'error'); return; }
+
+  _storicoDati = voli;
+  renderStorico(filtraStorico(voli));
+}
+
+function resetFiltri() {
+  document.getElementById('f-stato-volo').value = '';
+  document.getElementById('f-compagnia-nome').value = '';
+  document.getElementById('f-data-volo').value = '';
+  caricaStorico(null);
+}
+
+/* ─── Aeroporti ─── */
+function renderAeroporti(lista) {
+  const tbody = document.getElementById('aeroporti-body');
+  /* Mostra il messaggio guida la prima volta (tabella non ancora popolata dall'utente) */
+  const infoEl = document.getElementById('aeroporti-info');
+  infoEl.style.display = lista.length === 0 ? 'block' : 'none';
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="padding:32px;text-align:center;color:var(--c-muted);">
+      Nessun aeroporto registrato. Usa il pulsante "Aggiungi aeroporto" per iniziare.
+    </td></tr>`;
+    return;
+  }
+  tbody.innerHTML = lista.map(a => `<tr>
+    <td><span class="codice-volo">${a.codice}</span></td>
+    <td>${a.nome || '—'}</td>
+    <td>${a.lat}</td>
+    <td>${a.lon}</td>
+  </tr>`).join('');
+}
+
+async function caricaAeroporti() {
+  const { ok, data } = await apiFetch('/api/aeroporti');
+  if (ok) renderAeroporti(data);
+  else showToast('Errore nel caricamento degli aeroporti.', 'error');
+}
+
+async function salvaAeroporto(evt) {
+  evt.preventDefault();
+  const errEl = document.getElementById('aeroporto-error');
+  errEl.style.display = 'none';
+
+  const codice = document.getElementById('a-codice').value.trim().toUpperCase();
+  const nome   = document.getElementById('a-nome').value.trim();
+  const lat    = document.getElementById('a-lat').value;
+  const lon    = document.getElementById('a-lon').value;
+
+  if (!codice || !lat || !lon) {
+    errEl.textContent = 'Codice IATA, latitudine e longitudine sono obbligatori.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+
+  const { ok, data } = await apiFetch('/api/admin/aeroporti', {
+    method: 'POST',
+    body: JSON.stringify({ codice, nome, lat: parseFloat(lat), lon: parseFloat(lon) })
+  });
+
+  btn.disabled = false;
+
+  if (ok) {
+    showToast(`Aeroporto ${codice} inserito.`);
+    closeModal('modal-aeroporto');
+    document.getElementById('form-aeroporto').reset();
+    caricaAeroporti();
+  } else {
+    errEl.textContent = data.errore || 'Errore durante il salvataggio.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Gestione Utenti ─── */
+function renderUtenti(lista) {
+  const tbody = document.getElementById('utenti-body');
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--c-muted);">
+      Nessun utente trovato.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = lista.map(u => {
+    const statoLabel = u.attivo ? 'Attivo' : 'Bloccato';
+    const statoColor = u.attivo ? 'var(--c-success)' : 'var(--c-danger)';
+    const riferimento = u.compagnia_nome
+      ? `<span class="text-sm">${u.compagnia_nome}</span>`
+      : u.passeggero_nome
+      ? `<span class="text-sm">${u.passeggero_nome} ${u.passeggero_cognome || ''}</span>`
+      : '<span class="text-muted text-sm">—</span>';
+
+    return `<tr>
+      <td>${u.id}</td>
+      <td><strong>${u.username}</strong></td>
+      <td><span class="badge-stato badge-${u.ruolo}">${u.ruolo}</span></td>
+      <td>${riferimento}</td>
+      <td><span style="color:${statoColor};font-weight:600;font-size:13px;">${statoLabel}</span></td>
+      <td>
+        <div style="display:flex;gap:var(--sp-2);">
+          <button class="btn-action" style="font-size:12px;"
+                  onclick="toggleUtente(${u.id}, ${u.attivo ? 0 : 1}, '${u.username}')">
+            <i class="bi bi-${u.attivo ? 'lock' : 'unlock'}" aria-hidden="true"></i>
+            ${u.attivo ? 'Blocca' : 'Sblocca'}
+          </button>
+          <button class="btn-ghost" style="color:var(--c-danger);"
+                  onclick="apriEliminaUtente(${u.id}, '${u.username}')"
+                  aria-label="Elimina utente ${u.username}">
+            <i class="bi bi-trash3" aria-hidden="true"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function caricaUtenti() {
+  const { ok, data } = await apiFetch('/api/admin/utenti');
+  if (ok) renderUtenti(data);
+  else showToast('Errore nel caricamento degli utenti.', 'error');
+}
+
+async function toggleUtente(id, nuovoAttivo, username) {
+  const { ok, data } = await apiFetch(`/api/admin/utenti/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ attivo: nuovoAttivo })
+  });
+  if (ok) {
+    showToast(`Utente ${username} ${nuovoAttivo ? 'sbloccato' : 'bloccato'}.`);
+    caricaUtenti();
+  } else {
+    showToast(data.errore || 'Errore aggiornamento utente.', 'error');
+  }
+}
+
+let _utenteIdDaEliminare = null;
+
+function apriEliminaUtente(id, username) {
+  _utenteIdDaEliminare = id;
+  document.getElementById('del-utente-username').textContent = username;
+  document.getElementById('del-utente-error').style.display = 'none';
+  openModal('modal-elimina-utente');
+}
+
+async function confermEliminaUtente() {
+  if (!_utenteIdDaEliminare) return;
+  const btn   = document.getElementById('btn-conferma-del-utente');
+  const errEl = document.getElementById('del-utente-error');
+  btn.disabled = true; errEl.style.display = 'none';
+
+  const { ok, data } = await apiFetch(`/api/admin/utenti/${_utenteIdDaEliminare}`, { method: 'DELETE' });
+  btn.disabled = false;
+
+  if (ok) {
+    showToast('Utente eliminato.');
+    closeModal('modal-elimina-utente');
+    _utenteIdDaEliminare = null;
+    caricaUtenti();
+  } else {
+    errEl.textContent = data.errore || 'Errore durante l\'eliminazione.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Backup / Restore ─── */
+function onBackupFileSelected() {
+  const file = document.getElementById('inp-backup-file').files[0];
+  document.getElementById('btn-restore').disabled = !file;
+  if (file) document.getElementById('restore-filename').textContent = file.name;
+}
+
+async function confermRestore() {
+  const file   = document.getElementById('inp-backup-file').files[0];
+  const errEl  = document.getElementById('restore-error');
+  const btn    = document.getElementById('btn-conferma-restore');
+  if (!file) return;
+  btn.disabled = true; errEl.style.display = 'none';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const resp = await fetch('/api/admin/restore', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (resp.ok) {
+      showToast('Database ripristinato. Ricarica la pagina.');
+      closeModal('modal-restore');
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      errEl.textContent = data.errore || 'Errore durante il ripristino.';
+      errEl.style.display = 'block';
+    }
+  } catch (_) {
+    errEl.textContent = 'Errore di rete durante il ripristino.';
+    errEl.style.display = 'block';
+  }
+  btn.disabled = false;
+}
+
+/* ─── Log di sistema ─── */
+function logBadge(azione) {
+  if (!azione) return '<span class="badge-log badge-log-default">—</span>';
+  if (azione.startsWith('login')) return `<span class="badge-log badge-log-login">${azione}</span>`;
+  if (azione.includes('error') || azione.includes('failed'))
+    return `<span class="badge-log badge-log-error">${azione}</span>`;
+  if (['prenotazione','pagamento','checkin_online','checkin_banco','cancellazione',
+       'crea_volo','modifica_volo','elimina_volo','modifica_gate','crea_aeroporto',
+       'ripristino_db','modifica_utente','elimina_utente','ricarica_crediti','valutazione']
+      .some(k => azione.includes(k)))
+    return `<span class="badge-log badge-log-write">${azione}</span>`;
+  return `<span class="badge-log badge-log-default">${azione}</span>`;
+}
+
+function renderLog(lista) {
+  const tbody = document.getElementById('log-body');
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="padding:32px;text-align:center;color:var(--c-muted);">
+      Nessun evento nel periodo selezionato.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = lista.map(l => {
+    let dettagliStr = '—';
+    if (l.dettagli) {
+      try {
+        const obj = JSON.parse(l.dettagli);
+        dettagliStr = Object.entries(obj).map(([k,v]) => `<span class="text-muted text-sm">${k}:</span> ${v}`).join(' &nbsp;·&nbsp; ');
+      } catch(_) { dettagliStr = l.dettagli; }
+    }
+    return `<tr>
+      <td style="white-space:nowrap;font-size:12px;color:var(--c-muted);">${l.timestamp}</td>
+      <td>${l.username ? `<strong>${l.username}</strong>` : '<span class="text-muted text-sm">anonimo</span>'}</td>
+      <td>${logBadge(l.azione)}</td>
+      <td style="font-size:12px;">${dettagliStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function caricaLog(evt) {
+  if (evt) evt.preventDefault();
+  const azione  = document.getElementById('f-log-azione').value.trim();
+  const da      = document.getElementById('f-log-da').value;
+  const a       = document.getElementById('f-log-a').value;
+  const limite  = document.getElementById('f-log-limite').value;
+
+  const params = new URLSearchParams();
+  if (azione) params.set('azione', azione);
+  if (da)     params.set('data_da', da);
+  if (a)      params.set('data_a', a);
+  params.set('limite', limite);
+
+  document.getElementById('log-body').innerHTML =
+    `<tr><td colspan="4" style="padding:24px;text-align:center;">
+      <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>
+    </td></tr>`;
+
+  const { ok, data } = await apiFetch('/api/admin/log?' + params.toString());
+  if (ok) renderLog(data);
+  else showToast('Errore nel caricamento dei log.', 'error');
+}
+
+function resetLog() {
+  document.getElementById('f-log-azione').value = '';
+  document.getElementById('f-log-da').value = '';
+  document.getElementById('f-log-a').value  = '';
+  document.getElementById('f-log-limite').value = '100';
+  caricaLog(null);
+}
+
+/* ─── Avvio ─── */
+async function caricaTutto() {
+  caricaStats();
+  caricaStorico(null);
+  caricaUtenti();
+  caricaLog(null);
+  caricaAeroporti();
+}
+
+caricaTutto();
+</script>
+{% endblock %}

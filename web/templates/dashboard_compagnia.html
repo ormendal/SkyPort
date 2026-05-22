@@ -1,0 +1,504 @@
+{% extends "base.html" %}
+{% block title %}Gestione voli{% endblock %}
+
+{% block content %}
+<div class="page-wrap">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">
+        <i class="bi bi-airplane" aria-hidden="true"></i> Gestione voli
+      </h1>
+      <p class="page-subtitle">Benvenuto, <strong>{{ session.username }}</strong></p>
+    </div>
+    <button class="btn-cta" onclick="apriNuovoVolo()" aria-haspopup="dialog">
+      <i class="bi bi-plus-lg" aria-hidden="true"></i> Nuovo volo
+    </button>
+  </div>
+
+  <div class="app-table-wrap">
+    <table class="app-table" id="voli-table" aria-label="I tuoi voli">
+      <thead>
+        <tr>
+          <th scope="col">Codice</th>
+          <th scope="col">Tratta</th>
+          <th scope="col">Partenza</th>
+          <th scope="col">Arrivo</th>
+          <th scope="col">Gate</th>
+          <th scope="col">Prezzo</th>
+          <th scope="col">Posti tot.</th>
+          <th scope="col">Liberi</th>
+          <th scope="col">Stato</th>
+          <th scope="col"><span class="visually-hidden">Azioni</span></th>
+        </tr>
+      </thead>
+      <tbody id="voli-body">
+        <tr><td colspan="9" style="padding:32px;text-align:center;">
+          <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal: Nuovo / Modifica volo -->
+<div id="modal-volo" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="modal-volo-title">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h2 id="modal-volo-title">Nuovo volo</h2>
+      <button class="btn-ghost" onclick="closeModal('modal-volo')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <form id="form-volo" onsubmit="salvaVolo(event)" novalidate>
+      <div class="modal-body">
+        <input type="hidden" id="volo-id">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div class="form-group">
+            <label class="app-label" for="f-codice">Codice volo</label>
+            <input id="f-codice" class="app-input" type="text" required
+                   maxlength="10" placeholder="EN1234" style="text-transform:uppercase;">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="f-gate">
+              ID Gate <span style="font-weight:400;text-transform:none;">(opzionale)</span>
+            </label>
+            <input id="f-gate" class="app-input" type="number" min="1" placeholder="—">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div class="form-group">
+            <label class="app-label" for="f-origine">Origine (IATA)</label>
+            <input id="f-origine" class="app-input" type="text" required
+                   maxlength="3" placeholder="MXP" style="text-transform:uppercase;">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="f-dest">Destinazione (IATA)</label>
+            <input id="f-dest" class="app-input" type="text" required
+                   maxlength="3" placeholder="FCO" style="text-transform:uppercase;">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div class="form-group">
+            <label class="app-label" for="f-partenza">Data/ora partenza</label>
+            <input id="f-partenza" class="app-input" type="datetime-local" required>
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="f-arrivo">Data/ora arrivo</label>
+            <input id="f-arrivo" class="app-input" type="datetime-local" required>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div class="form-group">
+            <label class="app-label" for="f-posti">Posti totali</label>
+            <input id="f-posti" class="app-input" type="number" min="1" required
+                   placeholder="150">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="f-prezzo">Prezzo base (€)</label>
+            <input id="f-prezzo" class="app-input" type="number" min="0" step="0.01" required
+                   placeholder="100.00">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+          <div id="f-stato-group" class="form-group" style="display:none;">
+            <label class="app-label" for="f-stato">Stato volo</label>
+            <select id="f-stato" class="app-select">
+              <option value="programmato">Programmato</option>
+              <option value="partito">Partito</option>
+              <option value="arrivato">Arrivato</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="modal-volo-error" class="form-error-msg" role="alert" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn-cta">
+          <i class="bi bi-check-lg" aria-hidden="true"></i> Salva
+        </button>
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-volo')">Annulla</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Lista passeggeri del volo -->
+<div id="modal-passeggeri" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="pass-volo-title">
+  <div class="modal-panel" style="max-width:680px;">
+    <div class="modal-header">
+      <h2 id="pass-volo-title">
+        <i class="bi bi-people-fill" aria-hidden="true"></i> Passeggeri
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-passeggeri')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body" style="padding:0;">
+      <div class="app-table-wrap" style="border:none;border-radius:0;">
+        <table class="app-table" aria-label="Passeggeri del volo">
+          <thead>
+            <tr>
+              <th scope="col">Nominativo</th>
+              <th scope="col">Documento</th>
+              <th scope="col">PNR</th>
+              <th scope="col">Stato</th>
+            </tr>
+          </thead>
+          <tbody id="pass-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('modal-passeggeri')">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Gestione ritardo -->
+<div id="modal-ritardo" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="ritardo-title">
+  <div class="modal-panel" style="max-width:480px;">
+    <div class="modal-header">
+      <h2 id="ritardo-title">
+        <i class="bi bi-clock-history" aria-hidden="true"></i> Gestione ritardo —
+        <span id="r-codice-volo" style="color:var(--c-muted);">—</span>
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-ritardo')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <form id="form-ritardo" onsubmit="salvaRitardo(event)" novalidate>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:var(--sp-4);">
+        <div class="form-group">
+          <label class="app-label" for="r-orario-stimato">Orario stimato di partenza</label>
+          <input id="r-orario-stimato" class="app-input" type="datetime-local" required>
+        </div>
+        <div class="form-group">
+          <label class="app-label" for="r-note">Note ritardo</label>
+          <input id="r-note" class="app-input" type="text"
+                 placeholder="es. Ritardo tecnico, attesa equipaggio…">
+        </div>
+        <div id="ritardo-error" class="form-error-msg" role="alert" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn-cta">
+          <i class="bi bi-check-lg" aria-hidden="true"></i> Salva
+        </button>
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-ritardo')">Annulla</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Conferma eliminazione volo -->
+<div id="modal-elimina" class="modal-overlay" role="alertdialog" aria-modal="true"
+     aria-labelledby="elimina-title" aria-describedby="elimina-desc">
+  <div class="modal-panel" style="max-width:440px;">
+    <div class="modal-header">
+      <h2 id="elimina-title" style="color:var(--c-danger);">
+        <i class="bi bi-trash3-fill" aria-hidden="true"></i> Elimina volo
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-elimina')" aria-label="Annulla eliminazione">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p id="elimina-desc" style="margin:0;font-size:15px;">
+        Sei sicuro di voler eliminare il volo
+        <strong id="elimina-codice">—</strong>?<br>
+        <span class="text-muted text-sm">
+          Questa operazione è irreversibile. Verranno eliminati anche i dati correlati
+          (es. prenotazioni cancellate o imbarcate).
+        </span>
+      </p>
+      <div id="elimina-error" class="form-error-msg" role="alert" style="display:none;margin-top:var(--sp-4);"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-conferma-elimina" class="btn-danger-sm" style="padding:8px 16px;"
+              onclick="confermEliminazione()">
+        <i class="bi bi-trash3" aria-hidden="true"></i> Elimina definitivamente
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-elimina')">Annulla</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ─── Helpers ─── */
+function fmtDt(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short' }) +
+         ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+}
+
+function isoToLocal(iso) {
+  if (!iso) return '';
+  return iso.replace(' ', 'T').substring(0, 16);
+}
+
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+/* ─── Modal nuovo volo ─── */
+function apriNuovoVolo() {
+  document.getElementById('modal-volo-title').textContent = 'Nuovo volo';
+  document.getElementById('volo-id').value = '';
+  document.getElementById('form-volo').reset();
+  document.getElementById('f-stato-group').style.display = 'none';
+  document.getElementById('f-codice').removeAttribute('readonly');
+  document.getElementById('modal-volo-error').style.display = 'none';
+  openModal('modal-volo');
+}
+
+function apriModifica(v) {
+  document.getElementById('modal-volo-title').textContent = `Modifica ${v.codice_volo}`;
+  document.getElementById('volo-id').value = v.id;
+  document.getElementById('f-codice').value = v.codice_volo;
+  document.getElementById('f-codice').setAttribute('readonly', 'readonly');
+  document.getElementById('f-gate').value    = v.gate_id || '';
+  document.getElementById('f-origine').value = v.origine;
+  document.getElementById('f-dest').value    = v.destinazione;
+  document.getElementById('f-partenza').value = isoToLocal(v.data_ora_partenza);
+  document.getElementById('f-arrivo').value   = isoToLocal(v.data_ora_arrivo);
+  document.getElementById('f-posti').value    = v.posti_totali;
+  document.getElementById('f-prezzo').value   = v.prezzo_base || '';
+  document.getElementById('f-stato').value    = v.stato;
+  document.getElementById('f-stato-group').style.display = 'block';
+  document.getElementById('modal-volo-error').style.display = 'none';
+  openModal('modal-volo');
+}
+
+async function salvaVolo(evt) {
+  evt.preventDefault();
+  const errEl  = document.getElementById('modal-volo-error');
+  errEl.style.display = 'none';
+  const voloId = document.getElementById('volo-id').value;
+
+  const payload = {
+    codice_volo:       document.getElementById('f-codice').value.trim().toUpperCase(),
+    gate_id:           document.getElementById('f-gate').value
+                         ? parseInt(document.getElementById('f-gate').value) : null,
+    origine:           document.getElementById('f-origine').value.trim().toUpperCase(),
+    destinazione:      document.getElementById('f-dest').value.trim().toUpperCase(),
+    data_ora_partenza: document.getElementById('f-partenza').value.replace('T', ' '),
+    data_ora_arrivo:   document.getElementById('f-arrivo').value.replace('T', ' '),
+    posti_totali:      parseInt(document.getElementById('f-posti').value),
+    prezzo_base:       parseFloat(document.getElementById('f-prezzo').value) || 100.0,
+    stato:             document.getElementById('f-stato').value,
+  };
+
+  const url    = voloId ? `/api/compagnia/voli/${voloId}` : '/api/compagnia/voli';
+  const method = voloId ? 'PUT' : 'POST';
+
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  const { ok, data } = await apiFetch(url, { method, body: JSON.stringify(payload) });
+  btn.disabled = false;
+
+  if (ok) {
+    showToast(voloId ? 'Volo aggiornato.' : 'Volo creato.');
+    closeModal('modal-volo');
+    caricaVoli();
+  } else {
+    errEl.textContent = data.errore || 'Errore durante il salvataggio.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Eliminazione volo ─── */
+let _voloIdDaEliminare = null;
+
+function apriElimina(v) {
+  _voloIdDaEliminare = v.id;
+  document.getElementById('elimina-codice').textContent = v.codice_volo;
+  document.getElementById('elimina-error').style.display = 'none';
+  openModal('modal-elimina');
+}
+
+async function confermEliminazione() {
+  if (!_voloIdDaEliminare) return;
+
+  const btn   = document.getElementById('btn-conferma-elimina');
+  const errEl = document.getElementById('elimina-error');
+  btn.disabled = true;
+  errEl.style.display = 'none';
+
+  const { ok, data } = await apiFetch(`/api/compagnia/voli/${_voloIdDaEliminare}`, {
+    method: 'DELETE'
+  });
+
+  btn.disabled = false;
+
+  if (ok) {
+    showToast(data.messaggio || 'Volo eliminato.');
+    closeModal('modal-elimina');
+    _voloIdDaEliminare = null;
+    /* Animazione fade-out della riga eliminata */
+    const riga = document.querySelector(`tr[data-volo-id="${_voloIdDaEliminare}"]`);
+    if (riga) riga.classList.add('row-deleting');
+    setTimeout(caricaVoli, 250);
+  } else {
+    errEl.textContent = data.errore || 'Errore durante l\'eliminazione.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Render e caricamento ─── */
+function renderVoli(lista) {
+  const tbody = document.getElementById('voli-body');
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--c-muted);">
+      Nessun volo registrato.
+      <button class="btn-action" style="margin-left:8px;" onclick="apriNuovoVolo()">Crea il primo</button>
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = lista.map(v => {
+    const puoEliminare = v.stato === 'programmato';
+    const eliminaBtn   = `<button class="btn-ghost" style="color:var(--c-danger);font-size:16px;"
+                            onclick='apriElimina(${JSON.stringify(v)})'
+                            ${!puoEliminare ? 'disabled title="Solo i voli programmato possono essere eliminati"' : ''}
+                            aria-label="Elimina volo ${v.codice_volo}">
+                            <i class="bi bi-trash3" aria-hidden="true"></i>
+                          </button>`;
+
+    /* Badge warning gate: arancione se ci sono conflitti */
+    const warnGate = v.warning_gate
+      ? `<span title="${v.warning_gate}" style="margin-left:4px;color:var(--c-warn);font-size:13px;cursor:help;">
+           <i class="bi bi-exclamation-triangle-fill" aria-label="${v.warning_gate}"></i>
+         </span>`
+      : '';
+
+    /* Partenza stimata se diversa da quella programmata */
+    const partenzaCell = v.orario_stimato
+      ? `<span style="text-decoration:line-through;color:var(--c-muted);font-size:12px;">${fmtDt(v.data_ora_partenza)}</span>
+         <br><span style="color:var(--c-danger);font-weight:600;">${fmtDt(v.orario_stimato)}</span>`
+      : fmtDt(v.data_ora_partenza);
+
+    const prezzoStr = v.prezzo_base != null
+      ? new Intl.NumberFormat('it-IT', { style:'currency', currency:'EUR' }).format(v.prezzo_base)
+      : '—';
+
+    return `<tr data-volo-id="${v.id}">
+      <td><span class="codice-volo">${v.codice_volo}</span></td>
+      <td><strong>${v.origine}</strong> → <strong>${v.destinazione}</strong></td>
+      <td style="white-space:nowrap;">${partenzaCell}</td>
+      <td style="white-space:nowrap;">${fmtDt(v.data_ora_arrivo)}</td>
+      <td>${v.gate || '—'}${warnGate}</td>
+      <td style="white-space:nowrap;">${prezzoStr}</td>
+      <td>${v.posti_totali}</td>
+      <td>${v.posti_liberi ?? '—'}</td>
+      <td><span class="badge-stato badge-${v.stato}">${v.stato}</span></td>
+      <td>
+        <div style="display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;">
+          <button class="btn-action" style="font-size:12px;"
+                  onclick='apriModifica(${JSON.stringify(v)})'>
+            <i class="bi bi-pencil" aria-hidden="true"></i> Modifica
+          </button>
+          <button class="btn-action" style="font-size:12px;"
+                  onclick='apriPasseggeri(${v.id}, "${v.codice_volo}")'>
+            <i class="bi bi-people" aria-hidden="true"></i> Passeggeri
+          </button>
+          <button class="btn-action" style="font-size:12px;"
+                  onclick='apriRitardo(${JSON.stringify(v)})'>
+            <i class="bi bi-clock-history" aria-hidden="true"></i> Ritardo
+          </button>
+          ${eliminaBtn}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function caricaVoli() {
+  const { ok, data } = await apiFetch('/api/compagnia/voli');
+  if (ok) renderVoli(data);
+  else showToast('Errore nel caricamento dei voli.', 'error');
+}
+
+/* ─── Modal: Lista passeggeri del volo ─── */
+async function apriPasseggeri(voloId, codiceVolo) {
+  document.getElementById('pass-volo-title').textContent = `Passeggeri — ${codiceVolo}`;
+  document.getElementById('pass-body').innerHTML =
+    '<tr><td colspan="4" style="padding:20px;text-align:center;"><span class="skeleton" style="width:200px;height:14px;">&nbsp;</span></td></tr>';
+  openModal('modal-passeggeri');
+
+  const { ok, data } = await apiFetch(`/api/compagnia/voli/${voloId}/passeggeri`);
+  const tbody = document.getElementById('pass-body');
+  if (!ok) {
+    tbody.innerHTML = `<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--c-danger);">
+      Errore nel caricamento.</td></tr>`;
+    return;
+  }
+  if (data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--c-muted);">
+      Nessun passeggero imbarcato o con check-in.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.map(p => `<tr>
+    <td>${p.nome} ${p.cognome}</td>
+    <td><span class="codice-volo" style="font-size:12px;">${p.documento}</span></td>
+    <td><span class="codice-volo" style="font-size:12px;">${p.codice_prenotazione}</span></td>
+    <td><span class="badge-stato badge-${p.stato}">${p.stato}</span></td>
+  </tr>`).join('');
+}
+
+/* ─── Modal: Gestione ritardo ─── */
+let _voloIdRitardo = null;
+
+function apriRitardo(v) {
+  _voloIdRitardo = v.id;
+  document.getElementById('r-codice-volo').textContent = v.codice_volo;
+  document.getElementById('r-orario-stimato').value = v.orario_stimato
+    ? v.orario_stimato.replace(' ', 'T').substring(0, 16)
+    : v.data_ora_partenza.replace(' ', 'T').substring(0, 16);
+  document.getElementById('r-note').value = v.ritardo_note || '';
+  document.getElementById('ritardo-error').style.display = 'none';
+  openModal('modal-ritardo');
+}
+
+async function salvaRitardo(evt) {
+  evt.preventDefault();
+  const errEl = document.getElementById('ritardo-error');
+  errEl.style.display = 'none';
+  if (!_voloIdRitardo) return;
+
+  const orario = document.getElementById('r-orario-stimato').value.replace('T', ' ');
+  const note   = document.getElementById('r-note').value.trim();
+
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  const { ok, data } = await apiFetch(`/api/compagnia/voli/${_voloIdRitardo}`, {
+    method: 'PUT',
+    body: JSON.stringify({ orario_stimato: orario, ritardo_note: note })
+  });
+  btn.disabled = false;
+
+  if (ok) {
+    showToast('Informazioni ritardo aggiornate.');
+    closeModal('modal-ritardo');
+    caricaVoli();
+  } else {
+    errEl.textContent = data.errore || 'Errore durante il salvataggio.';
+    errEl.style.display = 'block';
+  }
+}
+
+caricaVoli();
+</script>
+{% endblock %}

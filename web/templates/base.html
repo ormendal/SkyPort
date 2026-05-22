@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}SkyPort{% endblock %} — Sistema Aeroportuale</title>
+
+  <!--
+    Script inline nel <head>: imposta data-bs-theme PRIMA del rendering
+    per evitare il "flash" del tema chiaro durante il caricamento.
+  -->
+  <script>
+    (function () {
+      var d = document.documentElement;
+      d.classList.add('no-dm-transition');
+      try {
+        var t = localStorage.getItem('darkMode');
+        if (t === null) {
+          t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+            ? 'true' : 'false';
+        }
+        if (t === 'true') d.setAttribute('data-bs-theme', 'dark');
+      } catch (e) { /* localStorage non disponibile: tema chiaro di default */ }
+      /* Riabilita le transizioni CSS dopo due frame di rendering */
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          d.classList.remove('no-dm-transition');
+        });
+      });
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<nav class="topbar navbar" aria-label="Navigazione principale">
+  <div class="container-fluid px-4">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+      <i class="bi bi-airplane-fill" style="font-size:18px;" aria-hidden="true"></i>
+      SkyPort
+    </a>
+    <div class="d-flex align-items-center gap-3">
+      {% if session.get('username') %}
+        <span class="role-badge" aria-label="Ruolo: {{ session.ruolo }}">{{ session.ruolo }}</span>
+        <span class="topbar-nav-link">{{ session.username }}</span>
+
+        {# Link area personale in base al ruolo #}
+        {% if session.get('ruolo') == 'passeggero' %}
+          <a href="/dashboard/passeggero" class="topbar-nav-link">
+            <i class="bi bi-ticket-perforated" aria-hidden="true"></i> Prenotazioni
+          </a>
+        {% elif session.get('ruolo') == 'compagnia' %}
+          <a href="/dashboard/compagnia" class="topbar-nav-link">
+            <i class="bi bi-airplane" aria-hidden="true"></i> Voli
+          </a>
+        {% else %}
+          <a href="/dashboard/{{ session.ruolo }}" class="topbar-nav-link">
+            <i class="bi bi-grid-fill" aria-hidden="true"></i> Dashboard
+          </a>
+        {% endif %}
+
+        {# Campanella notifiche #}
+        <div class="notif-wrapper" id="notif-wrapper">
+          <button class="btn-ghost" id="notif-btn" onclick="toggleNotifiche()"
+                  aria-label="Notifiche" aria-haspopup="true" aria-expanded="false">
+            <i class="bi bi-bell-fill" aria-hidden="true"></i>
+            <span id="notif-badge" class="notif-badge" style="display:none;" aria-label=""></span>
+          </button>
+          <div id="notif-dropdown" class="notif-dropdown" style="display:none;" role="menu">
+            <div class="notif-header">
+              <span>Notifiche</span>
+              <button class="btn-ghost" style="font-size:12px;padding:2px 8px;"
+                      onclick="segnaComeLette()" title="Segna tutte come lette">
+                <i class="bi bi-check2-all" aria-hidden="true"></i> Lette
+              </button>
+            </div>
+            <div id="notif-lista" class="notif-lista">
+              <div class="notif-empty">Caricamento…</div>
+            </div>
+          </div>
+        </div>
+
+        {# Toggle dark/light mode #}
+        <button class="btn-ghost" id="btn-dm" onclick="toggleDarkMode()"
+                aria-label="Attiva tema scuro">
+          <i class="bi bi-moon-fill" id="dm-icon" aria-hidden="true"></i>
+        </button>
+
+        <button class="btn-ghost" onclick="logout()" aria-label="Esci">
+          <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
+        </button>
+      {% else %}
+        {# Utente non loggato: solo toggle tema #}
+        <button class="btn-ghost" id="btn-dm" onclick="toggleDarkMode()"
+                aria-label="Attiva tema scuro">
+          <i class="bi bi-moon-fill" id="dm-icon" aria-hidden="true"></i>
+        </button>
+        <a href="/login" class="btn-outline-nav">
+          <i class="bi bi-person-fill" aria-hidden="true"></i> Accedi
+        </a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+<div id="toast-container" class="position-fixed top-0 end-0 p-3"
+     style="z-index:9999;padding-top:68px !important;"
+     aria-live="polite" aria-atomic="true"></div>
+
+<main id="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+/* ─── Variabile globale: utente loggato ─── */
+const LOGGED = {{ ('utente_id' in session) | tojson }};
+const RUOLO  = {{ session.get('ruolo') | tojson }};
+
+/* ─── Toast ─── */
+function showToast(msg, tipo = 'success') {
+  const container = document.getElementById('toast-container');
+  const id    = 'toast-' + Date.now();
+  const color = tipo === 'success' ? 'var(--c-success)' : tipo === 'warn' ? 'var(--c-warn)' : 'var(--c-danger)';
+  const icon  = tipo === 'success' ? 'bi-check-circle-fill' : tipo === 'warn' ? 'bi-exclamation-triangle-fill' : 'bi-x-circle-fill';
+  container.insertAdjacentHTML('beforeend', `
+    <div id="${id}" class="app-toast" role="status">
+      <div class="toast-stripe" style="background:${color};"></div>
+      <div class="toast-inner">
+        <i class="bi ${icon}" style="color:${color};font-size:16px;flex-shrink:0;" aria-hidden="true"></i>
+        <span>${msg}</span>
+        <button class="toast-close" onclick="this.closest('.app-toast').remove()" aria-label="Chiudi notifica">
+          <i class="bi bi-x" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>`);
+  setTimeout(() => {
+    const el = document.getElementById(id);
+    if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 250); }
+  }, 4000);
+}
+
+/* ─── Fetch helper ─── */
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    ...opts
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+/* ─── Logout ─── */
+async function logout() {
+  try { await fetch('/api/logout', { method: 'POST' }); } finally { window.location.href = '/'; }
+}
+
+/* ─── Dark mode ─── */
+function _temaCorrente() {
+  return document.documentElement.getAttribute('data-bs-theme') === 'dark';
+}
+
+function _aggiornaBtnDm() {
+  const isDark = _temaCorrente();
+  const btn  = document.getElementById('btn-dm');
+  const icon = document.getElementById('dm-icon');
+  if (!btn || !icon) return;
+  if (isDark) {
+    icon.className = 'bi bi-sun-fill';
+    btn.setAttribute('aria-label', 'Attiva tema chiaro');
+  } else {
+    icon.className = 'bi bi-moon-fill';
+    btn.setAttribute('aria-label', 'Attiva tema scuro');
+  }
+}
+
+function toggleDarkMode() {
+  const isDark = _temaCorrente();
+  const nuovoTema = isDark ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-bs-theme', nuovoTema);
+  try { localStorage.setItem('darkMode', String(!isDark)); } catch (e) {}
+  _aggiornaBtnDm();
+  /* Aggiorna tiles Leaflet se la mappa è presente */
+  if (window._mapDmUpdate) window._mapDmUpdate(nuovoTema === 'dark');
+}
+
+/* ─── Notifiche ─── */
+let _notifDropdownOpen = false;
+
+function toggleNotifiche() {
+  const dd  = document.getElementById('notif-dropdown');
+  const btn = document.getElementById('notif-btn');
+  _notifDropdownOpen = !_notifDropdownOpen;
+  dd.style.display = _notifDropdownOpen ? 'block' : 'none';
+  btn.setAttribute('aria-expanded', _notifDropdownOpen);
+  if (_notifDropdownOpen) segnaComeLette();
+}
+
+/* Chiude il dropdown cliccando fuori */
+document.addEventListener('click', function (e) {
+  const wrapper = document.getElementById('notif-wrapper');
+  if (wrapper && !wrapper.contains(e.target) && _notifDropdownOpen) {
+    _notifDropdownOpen = false;
+    document.getElementById('notif-dropdown').style.display = 'none';
+    document.getElementById('notif-btn').setAttribute('aria-expanded', 'false');
+  }
+});
+
+function _tempoRelativo(ts) {
+  if (!ts) return '';
+  const d    = new Date(ts.replace(' ', 'T'));
+  const diff = Math.floor((Date.now() - d) / 1000);
+  if (diff < 60)     return 'adesso';
+  if (diff < 3600)   return `${Math.floor(diff / 60)} min fa`;
+  if (diff < 86400)  return `${Math.floor(diff / 3600)} ore fa`;
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+}
+
+function _letteDaStorage() {
+  try { return JSON.parse(localStorage.getItem('notificheLette') || '[]'); } catch (e) { return []; }
+}
+
+async function caricaNotifiche() {
+  if (!LOGGED) return;
+  try {
+    const { ok, data } = await apiFetch('/api/notifiche');
+    if (!ok || !Array.isArray(data)) return;
+
+    const lette    = _letteDaStorage();
+    const nonLette = data.filter(n => !lette.includes(n.id));
+
+    /* Aggiorna badge */
+    const badge = document.getElementById('notif-badge');
+    if (badge) {
+      if (nonLette.length > 0) {
+        badge.textContent = nonLette.length > 9 ? '9+' : String(nonLette.length);
+        badge.setAttribute('aria-label', `${nonLette.length} notifiche non lette`);
+        badge.style.display = 'flex';
+        badge.classList.add('notif-badge-pulse');
+      } else {
+        badge.style.display = 'none';
+        badge.classList.remove('notif-badge-pulse');
+      }
+    }
+
+    /* Popola lista */
+    const lista = document.getElementById('notif-lista');
+    if (!lista) return;
+    if (data.length === 0) {
+      lista.innerHTML = '<div class="notif-empty"><i class="bi bi-bell-slash" style="font-size:20px;display:block;margin-bottom:6px;"></i>Nessuna notifica recente</div>';
+      return;
+    }
+    lista.innerHTML = data.map(n => {
+      const isLetta = lette.includes(n.id);
+      const tipoClass = `notif-item-tipo-${n.tipo || ''}`;
+      return `<div class="notif-item ${isLetta ? 'letta' : ''} ${tipoClass}" data-id="${n.id}" role="menuitem">
+        <i class="bi ${n.icona || 'bi-info-circle'}" aria-hidden="true"></i>
+        <div>
+          <div class="notif-item-testo">${n.testo}</div>
+          <div class="notif-item-ora">${_tempoRelativo(n.timestamp)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch (e) { /* silenzioso */ }
+}
+
+function segnaComeLette() {
+  const ids = Array.from(document.querySelectorAll('#notif-lista .notif-item[data-id]'))
+                   .map(el => el.getAttribute('data-id'));
+  try { localStorage.setItem('notificheLette', JSON.stringify(ids)); } catch (e) {}
+  document.querySelectorAll('#notif-lista .notif-item').forEach(el => el.classList.add('letta'));
+  const badge = document.getElementById('notif-badge');
+  if (badge) { badge.style.display = 'none'; badge.classList.remove('notif-badge-pulse'); }
+}
+
+/* ─── Avvio ─── */
+_aggiornaBtnDm();
+if (LOGGED) caricaNotifiche();
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

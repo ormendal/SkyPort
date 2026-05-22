@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+{% block title %}Operatore{% endblock %}
+
+{% block content %}
+<div class="page-wrap">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">
+        <i class="bi bi-person-badge-fill" aria-hidden="true"></i> Pannello operatore
+      </h1>
+      <p class="page-subtitle">Benvenuto, <strong>{{ session.username }}</strong></p>
+    </div>
+    <button class="btn-action" onclick="caricaGate()" aria-label="Aggiorna stato gate">
+      <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Aggiorna
+    </button>
+  </div>
+
+  <!-- ── Voli di oggi ── -->
+  <div style="margin-bottom:var(--sp-12);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-4);">
+      <h2 class="section-label" style="margin:0;">
+        <i class="bi bi-calendar-day" aria-hidden="true"></i> Voli di oggi
+      </h2>
+      <div style="display:flex;gap:var(--sp-3);align-items:flex-end;">
+        <div>
+          <label class="app-label" for="inp-data-voli">Data</label>
+          <input id="inp-data-voli" class="app-input" type="date" style="font-size:13px;"
+                 onchange="caricaVoliOggi()">
+        </div>
+        <button class="btn-ghost" onclick="caricaVoliOggi()" aria-label="Aggiorna voli">
+          <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+
+    <div id="voli-oggi-grid"
+         style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--sp-4);"
+         aria-live="polite">
+      <div style="padding:32px;color:var(--c-muted);text-align:center;grid-column:1/-1;">
+        <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gate status -->
+  <h2 class="section-label">
+    <i class="bi bi-sign-stop" aria-hidden="true"></i> Stato gate
+  </h2>
+  <div id="gate-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+       gap:var(--sp-6);margin-bottom:var(--sp-12);" aria-live="polite">
+    <div class="gate-card" aria-busy="true">
+      <div class="gate-card-accent skeleton" style="height:4px;border-radius:0;">&nbsp;</div>
+      <div class="gate-card-body">
+        <div class="skeleton" style="width:60px;height:36px;margin-bottom:8px;">&nbsp;</div>
+        <div class="skeleton" style="width:80px;height:16px;">&nbsp;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Check-in form -->
+  <h2 class="section-label">
+    <i class="bi bi-qr-code-scan" aria-hidden="true"></i> Check-in al banco
+  </h2>
+  <div class="app-card" style="max-width:680px;">
+    <div class="app-card-body">
+
+      <!-- Tab di ricerca -->
+      <div class="dash-tabs" role="tablist" style="margin-bottom:var(--sp-4);">
+        <button class="dash-tab active" id="ctab-doc" role="tab" aria-selected="true"
+                onclick="switchCheckinTab('doc')">
+          <i class="bi bi-card-text" aria-hidden="true"></i> Documento
+        </button>
+        <button class="dash-tab" id="ctab-pnr" role="tab" aria-selected="false"
+                onclick="switchCheckinTab('pnr')">
+          <i class="bi bi-upc-scan" aria-hidden="true"></i> Cod. prenotazione
+        </button>
+        <button class="dash-tab" id="ctab-nome" role="tab" aria-selected="false"
+                onclick="switchCheckinTab('nome')">
+          <i class="bi bi-person-search" aria-hidden="true"></i> Nome
+        </button>
+      </div>
+
+      <!-- Tab: Documento -->
+      <form id="form-checkin-doc" onsubmit="cercaPasseggero(event,'doc')" novalidate
+            style="display:block;">
+        <div style="display:flex;gap:var(--sp-3);align-items:flex-end;">
+          <div style="flex:1;" class="form-group">
+            <label class="app-label" for="inp-documento">Numero documento</label>
+            <input id="inp-documento" class="app-input" type="text" required
+                   autocomplete="off" placeholder="es. IT00001">
+          </div>
+          <button type="submit" class="btn-cta" style="flex-shrink:0;">
+            <i class="bi bi-search" aria-hidden="true"></i> Cerca
+          </button>
+        </div>
+      </form>
+
+      <!-- Tab: Codice prenotazione -->
+      <form id="form-checkin-pnr" onsubmit="cercaPasseggero(event,'pnr')" novalidate
+            style="display:none;">
+        <div style="display:flex;gap:var(--sp-3);align-items:flex-end;">
+          <div style="flex:1;" class="form-group">
+            <label class="app-label" for="inp-pnr">Codice prenotazione (PNR)</label>
+            <input id="inp-pnr" class="app-input" type="text" required
+                   autocomplete="off" placeholder="es. PNR12345" style="text-transform:uppercase;">
+          </div>
+          <button type="submit" class="btn-cta" style="flex-shrink:0;">
+            <i class="bi bi-search" aria-hidden="true"></i> Cerca
+          </button>
+        </div>
+      </form>
+
+      <!-- Tab: Nome e cognome -->
+      <form id="form-checkin-nome" onsubmit="cercaPasseggero(event,'nome')" novalidate
+            style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:var(--sp-3);align-items:flex-end;">
+          <div class="form-group">
+            <label class="app-label" for="inp-nome">Nome</label>
+            <input id="inp-nome" class="app-input" type="text" required
+                   autocomplete="given-name" placeholder="Mario">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="inp-cognome">Cognome</label>
+            <input id="inp-cognome" class="app-input" type="text" required
+                   autocomplete="family-name" placeholder="Rossi">
+          </div>
+          <button type="submit" class="btn-cta">
+            <i class="bi bi-search" aria-hidden="true"></i> Cerca
+          </button>
+        </div>
+      </form>
+
+      <!-- Risultato ricerca -->
+      <div id="checkin-result" style="margin-top:var(--sp-6);display:none;" aria-live="polite"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal: Selezione posto e conferma check-in -->
+<div id="modal-checkin-posto" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="cp-title">
+  <div class="modal-panel" style="max-width:640px;">
+    <div class="modal-header">
+      <h2 id="cp-title">
+        <i class="bi bi-diagram-3-fill" aria-hidden="true"></i> Scegli posto
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-checkin-posto')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p id="cp-desc" class="text-sm text-muted" style="margin:0 0 var(--sp-4);"></p>
+      <div class="seat-map-wrap">
+        <div id="cp-seat-header" class="seat-col-header"></div>
+        <div id="cp-seat-map" class="seat-map" aria-label="Mappa posti"></div>
+      </div>
+      <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-4);font-size:12px;">
+        <span><span class="seat seat-free" style="display:inline-flex;width:18px;height:18px;font-size:8px;">  </span> Libero</span>
+        <span><span class="seat seat-occupied" style="display:inline-flex;width:18px;height:18px;font-size:8px;"> </span> Occupato</span>
+        <span><span class="seat seat-selected" style="display:inline-flex;width:18px;height:18px;font-size:8px;"> </span> Selezionato</span>
+      </div>
+      <div style="margin-top:var(--sp-4);">
+        <label class="app-label" for="cp-gate">Gate imbarco (opzionale)</label>
+        <input id="cp-gate" class="app-input" type="number" min="1" placeholder="ID gate"
+               style="max-width:120px;">
+      </div>
+      <div id="cp-error" class="form-error-msg" role="alert" style="display:none;margin-top:var(--sp-4);"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-conferma-posto" class="btn-cta" onclick="confermCheckinPosto()">
+        <i class="bi bi-check-circle" aria-hidden="true"></i> Conferma check-in
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-checkin-posto')">Annulla</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fmtDt(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short' }) +
+         ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+}
+
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+/* ─── Inizializza la data corrente nel selettore voli ─── */
+(function() {
+  const oggi = new Date();
+  const iso  = oggi.toISOString().substring(0, 10);
+  document.getElementById('inp-data-voli').value = iso;
+})();
+
+/* ─── Voli di oggi ─── */
+async function caricaVoliOggi() {
+  const data  = document.getElementById('inp-data-voli').value;
+  const grid  = document.getElementById('voli-oggi-grid');
+  grid.innerHTML = `<div style="padding:24px;color:var(--c-muted);text-align:center;grid-column:1/-1;">
+    <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span></div>`;
+
+  const params = data ? `?data=${data}` : '';
+  const { ok, data: voli } = await apiFetch('/api/operatore/voli' + params);
+  if (!ok) {
+    grid.innerHTML = `<div style="padding:24px;color:var(--c-danger);text-align:center;grid-column:1/-1;">
+      Errore nel caricamento dei voli.</div>`;
+    return;
+  }
+  if (voli.length === 0) {
+    grid.innerHTML = `<div style="padding:32px;color:var(--c-muted);text-align:center;grid-column:1/-1;">
+      <i class="bi bi-calendar-x" style="font-size:28px;display:block;margin-bottom:8px;" aria-hidden="true"></i>
+      Nessun volo per questa data.</div>`;
+    return;
+  }
+
+  grid.innerHTML = voli.map(v => {
+    const pct  = v.percentuale_occupazione ?? 0;
+    const barClass = pct >= 100 ? 'full' : pct >= 80 ? 'warn' : '';
+    return `<div class="volo-oggi-card">
+      <div class="volo-oggi-header">
+        <span class="codice-volo">${v.codice_volo}</span>
+        <span class="badge-stato badge-${v.stato_volo}">${v.stato_volo}</span>
+      </div>
+      <div class="text-sm" style="margin-bottom:var(--sp-2);">
+        <strong>${v.origine}</strong> → <strong>${v.destinazione}</strong>
+      </div>
+      <div class="text-sm text-muted" style="margin-bottom:var(--sp-3);">
+        Partenza: ${fmtDt(v.data_ora_partenza)}&nbsp;&nbsp;Gate: ${v.gate_codice || '—'}
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">
+          <span class="text-muted">Occupazione</span>
+          <span><strong>${v.posti_occupati}</strong>/${v.posti_totali}</span>
+        </div>
+        <div class="occ-bar-wrap">
+          <div class="occ-bar ${barClass}" style="width:${Math.min(pct,100)}%;"></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+const statoColors = {
+  libero:       'var(--c-success)',
+  occupato:     'var(--c-warn)',
+  manutenzione: 'var(--c-danger)',
+};
+
+function renderGate(gate) {
+  const grid = document.getElementById('gate-grid');
+  if (gate.length === 0) {
+    grid.innerHTML = '<p style="color:var(--c-muted);">Nessun gate disponibile.</p>';
+    return;
+  }
+  grid.innerHTML = gate.map(g => `
+    <div class="gate-card">
+      <div class="gate-card-accent gate-accent-${g.stato}"></div>
+      <div class="gate-card-body">
+        <div class="gate-label" aria-label="Gate ${g.codice}">${g.codice}</div>
+        <div style="margin:var(--sp-3) 0;">
+          <span class="badge-stato badge-${g.stato}">${g.stato}</span>
+        </div>
+        <p class="text-sm text-muted" style="margin:var(--sp-2) 0;">
+          ${g.voli_assegnati ? `Voli: <strong>${g.voli_assegnati}</strong>` : 'Nessun volo assegnato'}
+        </p>
+        <div style="margin-top:var(--sp-4);">
+          <label class="app-label" for="gate-stato-${g.id}">Cambia stato</label>
+          <div style="display:flex;gap:var(--sp-2);align-items:center;">
+            <select id="gate-stato-${g.id}" class="app-select" style="flex:1;"
+                    aria-label="Stato gate ${g.codice}">
+              <option value="libero"       ${g.stato === 'libero'       ? 'selected' : ''}>Libero</option>
+              <option value="occupato"     ${g.stato === 'occupato'     ? 'selected' : ''}>Occupato</option>
+              <option value="manutenzione" ${g.stato === 'manutenzione' ? 'selected' : ''}>Manutenzione</option>
+            </select>
+            <button class="btn-action" onclick="cambiaStato(${g.id})"
+                    aria-label="Salva stato gate ${g.codice}">
+              <i class="bi bi-check-lg" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+async function caricaGate() {
+  const { ok, data } = await apiFetch('/api/operatore/gate');
+  if (ok) renderGate(data);
+  else showToast('Errore nel caricamento dei gate.', 'error');
+}
+
+async function cambiaStato(gateId) {
+  const sel    = document.getElementById(`gate-stato-${gateId}`);
+  const stato  = sel.value;
+  const { ok, data } = await apiFetch(`/api/operatore/gate/${gateId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ stato })
+  });
+  if (ok) { showToast(`Gate aggiornato: ${stato}.`); caricaGate(); }
+  else showToast(data.errore || 'Errore aggiornamento gate.', 'error');
+}
+
+/* ─── Tab check-in ─── */
+function switchCheckinTab(tab) {
+  ['doc','pnr','nome'].forEach(t => {
+    document.getElementById(`form-checkin-${t}`).style.display = t === tab ? 'block' : 'none';
+    document.getElementById(`ctab-${t}`).classList.toggle('active', t === tab);
+    document.getElementById(`ctab-${t}`).setAttribute('aria-selected', t === tab);
+  });
+  document.getElementById('checkin-result').style.display = 'none';
+}
+
+let _selectedPrenId = null;
+let _selectedPosto  = null;
+
+function renderCheckinResult(pren) {
+  const el = document.getElementById('checkin-result');
+  el.style.display = 'block';
+
+  if (pren.length === 0) {
+    el.innerHTML = `<div class="form-error-msg">
+      Nessuna prenotazione idonea al check-in trovata per questo passeggero.
+    </div>`;
+    return;
+  }
+
+  _selectedPrenId = pren.length === 1 ? pren[0].id : null;
+  _selectedPosto  = null;
+
+  const rows = pren.map(p => `
+    <label style="display:flex;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-3);
+                  border:1.5px solid var(--c-border);border-radius:var(--radius-sm);cursor:pointer;
+                  margin-bottom:var(--sp-2);"
+           data-pren='${JSON.stringify(p)}'>
+      <input type="radio" name="pren-sel" value="${p.id}"
+             ${pren.length === 1 ? 'checked' : ''}
+             onchange="_selectedPrenId = ${p.id}"
+             style="margin-top:3px;flex-shrink:0;"
+             aria-label="Seleziona prenotazione ${p.codice_prenotazione}">
+      <div>
+        <div><strong class="codice-volo">${p.codice_volo}</strong>
+          <span class="text-sm text-muted" style="margin-left:8px;">${p.codice_prenotazione}</span>
+        </div>
+        <div class="text-sm text-muted">
+          ${p.origine} → ${p.destinazione} &bull; Partenza: ${fmtDt(p.data_ora_partenza)}
+        </div>
+      </div>
+    </label>`).join('');
+
+  el.innerHTML = `
+    <div style="margin-bottom:var(--sp-4);">
+      <p class="app-label" style="margin-bottom:var(--sp-3);">
+        ${pren.length === 1 ? 'Prenotazione trovata' : 'Seleziona prenotazione'}
+      </p>
+      ${rows}
+    </div>
+    <button class="btn-cta" onclick="apriSeatMap()">
+      <i class="bi bi-diagram-3" aria-hidden="true"></i> Scegli posto
+    </button>`;
+}
+
+async function cercaPasseggero(evt, tab) {
+  evt.preventDefault();
+  const el = document.getElementById('checkin-result');
+  el.style.display = 'block';
+  el.innerHTML = '<span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>';
+
+  let payload = {};
+  if (tab === 'doc') {
+    const documento = document.getElementById('inp-documento').value.trim();
+    if (!documento) return;
+    payload = { documento };
+  } else if (tab === 'pnr') {
+    const codice_prenotazione = document.getElementById('inp-pnr').value.trim().toUpperCase();
+    if (!codice_prenotazione) return;
+    payload = { codice_prenotazione };
+  } else {
+    const nome    = document.getElementById('inp-nome').value.trim();
+    const cognome = document.getElementById('inp-cognome').value.trim();
+    if (!nome || !cognome) return;
+    payload = { nome, cognome };
+  }
+
+  const { ok, data } = await apiFetch('/api/operatore/checkin', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  if (data.prenotazioni_disponibili) {
+    renderCheckinResult(data.prenotazioni_disponibili);
+    return;
+  }
+  el.innerHTML = `<div class="form-error-msg">${data.errore || 'Nessuna prenotazione trovata.'}</div>`;
+}
+
+/* ─── Seat map ─── */
+let _seatMapVolo = null;
+
+async function apriSeatMap() {
+  if (!_selectedPrenId) { showToast('Seleziona una prenotazione.', 'warn'); return; }
+
+  /* Recupera il volo_id dalla prenotazione selezionata (dal DOM) */
+  const radio = document.querySelector('input[name="pren-sel"]:checked');
+  if (!radio) { showToast('Seleziona una prenotazione.', 'warn'); return; }
+  const prenData = JSON.parse(radio.closest('label').dataset.pren || 'null');
+
+  /* Carica la mappa posti */
+  document.getElementById('cp-seat-map').innerHTML =
+    '<span class="skeleton" style="width:200px;height:60px;">&nbsp;</span>';
+  document.getElementById('cp-desc').textContent = 'Caricamento mappa posti…';
+  document.getElementById('cp-error').style.display = 'none';
+  _selectedPosto = null;
+  openModal('modal-checkin-posto');
+
+  const voloId = prenData ? prenData.volo_id : null;
+  if (!voloId) {
+    document.getElementById('cp-desc').textContent = 'Impossibile determinare il volo.';
+    return;
+  }
+
+  _seatMapVolo = voloId;
+  const { ok, data } = await apiFetch(`/api/voli/${voloId}/posti`);
+  if (!ok) {
+    document.getElementById('cp-desc').textContent = 'Errore nel caricamento della mappa.';
+    return;
+  }
+  renderSeatMap(data);
+}
+
+function renderSeatMap(info) {
+  const lettere = info.lettere_per_riga;  /* es. ['A','B','C','D','E','F'] */
+  const righe   = info.righe;
+  const occupati = new Set(info.posti_occupati);
+
+  document.getElementById('cp-desc').textContent =
+    `${info.posti_liberi_count} posti liberi su ${info.posti_totali}. Clicca su un posto per selezionarlo.`;
+
+  /* Intestazione colonne */
+  const header = document.getElementById('cp-seat-header');
+  header.innerHTML = lettere.map((l, i) => {
+    /* Spazio corsie dopo C (tra C e D) */
+    const aisle = (i === 3) ? '<div class="seat-col-label-aisle"></div>' : '';
+    return `${i === 3 ? aisle : ''}<div class="seat-col-label">${l}</div>`;
+  }).join('');
+
+  /* Righe posti */
+  const mapEl = document.getElementById('cp-seat-map');
+  mapEl.innerHTML = '';
+  for (let r = 1; r <= righe; r++) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'seat-row';
+    const labelEl = document.createElement('div');
+    labelEl.className = 'seat-row-label';
+    labelEl.textContent = r;
+    rowEl.appendChild(labelEl);
+
+    lettere.forEach((l, i) => {
+      if (i === 3) {
+        /* Corsia */
+        const aisleEl = document.createElement('div');
+        aisleEl.className = 'seat-aisle';
+        rowEl.appendChild(aisleEl);
+      }
+      const codice = `${r}${l}`;
+      const seatEl = document.createElement('div');
+      seatEl.className = 'seat ' + (occupati.has(codice) ? 'seat-occupied' : 'seat-free');
+      seatEl.textContent = codice;
+      seatEl.dataset.codice = codice;
+      if (!occupati.has(codice)) {
+        seatEl.addEventListener('click', () => selezionaPosto(codice));
+      }
+      rowEl.appendChild(seatEl);
+    });
+    mapEl.appendChild(rowEl);
+  }
+}
+
+function selezionaPosto(codice) {
+  /* Deseleziona precedente */
+  document.querySelectorAll('.seat-selected').forEach(s => {
+    s.classList.remove('seat-selected');
+    s.classList.add('seat-free');
+  });
+  /* Seleziona nuovo */
+  const el = document.querySelector(`.seat[data-codice="${codice}"]`);
+  if (el) { el.classList.remove('seat-free'); el.classList.add('seat-selected'); }
+  _selectedPosto = codice;
+}
+
+async function confermCheckinPosto() {
+  const errEl = document.getElementById('cp-error');
+  errEl.style.display = 'none';
+
+  if (!_selectedPrenId) {
+    errEl.textContent = 'Nessuna prenotazione selezionata.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const gateId = document.getElementById('cp-gate').value
+    ? parseInt(document.getElementById('cp-gate').value) : null;
+
+  const btn = document.getElementById('btn-conferma-posto');
+  btn.disabled = true;
+
+  const { ok, data } = await apiFetch('/api/operatore/checkin/exec', {
+    method: 'POST',
+    body: JSON.stringify({
+      prenotazione_id: _selectedPrenId,
+      numero_posto:    _selectedPosto || null,
+      gate_id:         gateId
+    })
+  });
+  btn.disabled = false;
+
+  if (ok) {
+    showToast(`Check-in completato — ${data.passeggero}, posto ${data.numero_posto}`);
+    closeModal('modal-checkin-posto');
+    document.getElementById('checkin-result').style.display = 'none';
+    /* Reset form attivo */
+    ['doc','pnr','nome'].forEach(t => {
+      const f = document.getElementById(`form-checkin-${t}`);
+      if (f) f.reset();
+    });
+    _selectedPrenId = null;
+    _selectedPosto  = null;
+    caricaGate();
+    caricaVoliOggi();
+  } else {
+    errEl.textContent = data.errore || 'Errore durante il check-in.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Avvio ─── */
+caricaGate();
+caricaVoliOggi();
+</script>
+{% endblock %}

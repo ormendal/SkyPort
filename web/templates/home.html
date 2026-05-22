@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+{% block title %}Voli{% endblock %}
+
+{% block head %}
+<!-- Leaflet.js — libreria per mappe interattive (stesso CDN di Bootstrap, nessun SRI) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+{% endblock %}
+
+{% block content %}
+
+<!-- Striscia di ricerca (navy) -->
+<section class="hero-strip">
+  <div class="page-wrap" style="padding-top:0;padding-bottom:0;">
+    <h1><i class="bi bi-search" aria-hidden="true"></i> Cerca voli</h1>
+    <form id="search-form" onsubmit="cercaVoli(event)" role="search" aria-label="Ricerca voli">
+      <div class="search-row">
+        <div class="search-field">
+          <label class="search-label" for="inp-origine">Partenza</label>
+          <input id="inp-origine" class="search-input" type="text" maxlength="3"
+                 placeholder="MXP" autocomplete="off" spellcheck="false"
+                 aria-label="Codice IATA aeroporto di partenza">
+        </div>
+        <div class="search-field">
+          <label class="search-label" for="inp-dest">Destinazione</label>
+          <input id="inp-dest" class="search-input" type="text" maxlength="3"
+                 placeholder="FCO" autocomplete="off" spellcheck="false"
+                 aria-label="Codice IATA aeroporto di destinazione">
+        </div>
+        <div class="search-field">
+          <label class="search-label" for="inp-data">Data</label>
+          <input id="inp-data" class="search-input" type="date"
+                 aria-label="Data di partenza">
+        </div>
+        <div style="flex-shrink:0;">
+          <button type="submit" class="btn-cta" style="height:38px;">
+            <i class="bi bi-search" aria-hidden="true"></i> Cerca
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</section>
+
+<!-- Mappa interattiva delle rotte — card con intestazione -->
+<div class="page-wrap" style="padding-top:var(--sp-6);padding-bottom:0;">
+  <div class="map-card">
+    <div class="map-card-header">
+      <i class="bi bi-globe2" aria-hidden="true"></i>
+      Voli attivi sulla mappa
+    </div>
+    <section class="map-section" aria-label="Mappa rotte voli attivi">
+      <div id="flight-map" role="img" aria-label="Mappa con i voli attivi"></div>
+      <div id="map-loading" class="map-loading">
+        <i class="bi bi-globe" style="font-size:22px;margin-bottom:6px;" aria-hidden="true"></i>
+        Caricamento mappa…
+      </div>
+      <div id="map-fallback" class="map-fallback" role="status">
+        <i class="bi bi-exclamation-circle" style="font-size:28px;" aria-hidden="true"></i>
+        <span>Mappa non disponibile.<br>Controlla la connessione e ricarica la pagina.</span>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- Lista voli -->
+<div class="page-wrap">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-4);">
+    <h2 class="section-label" style="margin:0;" id="results-title">Voli prenotabili</h2>
+    <span id="results-count" class="text-muted text-sm" aria-live="polite"></span>
+  </div>
+
+  <div class="app-table-wrap" id="results-wrap">
+    <table class="app-table" id="flights-table" aria-label="Elenco voli prenotabili">
+      <thead>
+        <tr>
+          <th scope="col">Volo</th>
+          <th scope="col">Compagnia</th>
+          <th scope="col">Tratta</th>
+          <th scope="col">Partenza</th>
+          <th scope="col">Arrivo</th>
+          <th scope="col">Gate</th>
+          <th scope="col">Posti liberi</th>
+          <th scope="col">Prezzo</th>
+          <th scope="col"><span class="visually-hidden">Azione</span></th>
+        </tr>
+      </thead>
+      <tbody id="flights-body">
+        <tr><td colspan="9" style="padding:32px;text-align:center;">
+          <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+/* RUOLO e LOGGED sono già dichiarati in base.html — non ridichiarare qui */
+
+/* ─── Helpers ─── */
+function fmtDt(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short' }) +
+         ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+}
+
+/* ─── Mappa ─── */
+let map = null;
+let mapLayers = [];
+let _tileLayer = null;
+
+/* Attribution CartoDB condivisa tra tile chiare e scure */
+const _TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+/* URL tile: Positron per tema chiaro, Dark Matter per tema scuro */
+function _tileUrl(isDark) {
+  return isDark
+    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+}
+
+/* Colore delle rotte adattato al tema: azzurro su scuro, navy su chiaro */
+function _routeColor() {
+  return document.documentElement.getAttribute('data-bs-theme') === 'dark'
+    ? '#4a8fd4'
+    : '#1a4a7a';
+}
+
+function initMap() {
+  try {
+    map = L.map('flight-map', { zoomControl: true, attributionControl: true });
+
+    /* Vista iniziale centrata sull'Italia: senza setView Leaflet non carica tile */
+    map.setView([44.0, 12.0], 5);
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+
+    /* Tile CartoDB: Positron (light) o Dark Matter (dark) in base al tema iniziale */
+    _tileLayer = L.tileLayer(_tileUrl(isDark), {
+      attribution: _TILE_ATTR,
+      subdomains: 'abcd',
+      maxZoom: 18
+    }).addTo(map);
+
+    document.getElementById('map-loading').style.display = 'none';
+    return true;
+  } catch (e) {
+    map = null;  /* azzera per evitare che aggiornaMappaVoli usi un oggetto rotto */
+    mostraFallbackMappa();
+    return false;
+  }
+}
+
+/* Esposto per base.html: scambia tile e aggiorna colore rotte al toggle tema */
+window._mapDmUpdate = function(isDark) {
+  if (!map || !_tileLayer) return;
+  map.removeLayer(_tileLayer);
+  _tileLayer = L.tileLayer(_tileUrl(isDark), {
+    attribution: _TILE_ATTR, subdomains: 'abcd', maxZoom: 18
+  }).addTo(map);
+  mapLayers.forEach(l => { if (typeof l.setStyle === 'function') l.setStyle({ color: _routeColor() }); });
+};
+
+function mostraFallbackMappa() {
+  document.getElementById('map-loading').style.display = 'none';
+  document.getElementById('flight-map').style.display = 'none';
+  document.getElementById('map-fallback').style.display = 'flex';
+}
+
+function creaIconaAeroporto(codice) {
+  return L.divIcon({
+    html: `<div class="airport-marker" title="${codice}">${codice}</div>`,
+    className: '',
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -22]
+  });
+}
+
+function popupHtml(v) {
+  const stato = v.stato || 'programmato';
+  const colorMap = { programmato:'var(--c-blue)', partito:'var(--c-gold)', arrivato:'var(--c-muted)' };
+  const color = colorMap[stato] || 'var(--c-blue)';
+  return `<div class="map-popup">
+    <div class="map-popup-header">
+      <span>${v.codice_volo}</span>
+      <span class="badge-stato badge-${stato}" style="font-size:10px;">${stato}</span>
+    </div>
+    <div class="map-popup-body">
+      <div class="map-popup-row">
+        <span class="map-popup-label">Compagnia</span>
+        <span>${v.compagnia}</span>
+      </div>
+      <div class="map-popup-row">
+        <span class="map-popup-label">Tratta</span>
+        <strong>${v.origine} → ${v.destinazione}</strong>
+      </div>
+      <div class="map-popup-row">
+        <span class="map-popup-label">Partenza</span>
+        <span>${fmtDt(v.data_ora_partenza)}</span>
+      </div>
+      <div class="map-popup-row">
+        <span class="map-popup-label">Arrivo</span>
+        <span>${fmtDt(v.data_ora_arrivo)}</span>
+      </div>
+      <div class="map-popup-row">
+        <span class="map-popup-label">Posti liberi</span>
+        <span>${v.posti_liberi ?? '—'}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function aggiornaMappaVoli(voli) {
+  if (!map) return;
+
+  /* Rimuove layer precedenti */
+  mapLayers.forEach(l => map.removeLayer(l));
+  mapLayers = [];
+
+  /* Traccia solo voli con coordinate complete */
+  const conCoord = voli.filter(
+    v => v.orig_lat != null && v.dest_lat != null
+  );
+
+  if (conCoord.length === 0) return;
+
+  /* Raccoglie aeroporti univoci per evitare marker doppi */
+  const aeroportiVisti = {};
+  const bounds = [];
+
+  conCoord.forEach(v => {
+    const popup = popupHtml(v);
+
+    /* Polilinea della rotta — tratteggiata, stile rotta aerea */
+    const polyline = L.polyline(
+      [[v.orig_lat, v.orig_lon], [v.dest_lat, v.dest_lon]],
+      {
+        color:     _routeColor(),
+        weight:    2,
+        opacity:   0.7,
+        dashArray: '7 5'
+      }
+    ).bindPopup(popup, { maxWidth: 280 });
+
+    polyline.on('mouseover', function() { this.setStyle({ weight: 3, opacity: 1 }); });
+    polyline.on('mouseout',  function() { this.setStyle({ weight: 2, opacity: 0.7 }); });
+
+    polyline.addTo(map);
+    mapLayers.push(polyline);
+    bounds.push([v.orig_lat, v.orig_lon], [v.dest_lat, v.dest_lon]);
+
+    /* Marker aeroporto origine */
+    if (!aeroportiVisti[v.origine]) {
+      aeroportiVisti[v.origine] = true;
+      const m = L.marker([v.orig_lat, v.orig_lon], { icon: creaIconaAeroporto(v.origine) })
+                  .bindPopup(popup, { maxWidth: 280 });
+      m.addTo(map);
+      mapLayers.push(m);
+    }
+
+    /* Marker aeroporto destinazione */
+    if (!aeroportiVisti[v.destinazione]) {
+      aeroportiVisti[v.destinazione] = true;
+      const m = L.marker([v.dest_lat, v.dest_lon], { icon: creaIconaAeroporto(v.destinazione) })
+                  .bindPopup(popup, { maxWidth: 280 });
+      m.addTo(map);
+      mapLayers.push(m);
+    }
+  });
+
+  /* Centra automaticamente per mostrare tutti i punti */
+  if (bounds.length > 0) {
+    map.fitBounds(bounds, { padding: [32, 32] });
+  }
+}
+
+/* ─── Tabella voli prenotabili ─── */
+function renderTabella(voli) {
+  /* Filtra: solo programmato + posti liberi > 0 */
+  const prenotabili = voli.filter(v => v.stato === 'programmato' && (v.posti_liberi ?? 0) > 0);
+
+  const tbody = document.getElementById('flights-body');
+  document.getElementById('results-count').textContent =
+    prenotabili.length === 1 ? '1 volo disponibile' : `${prenotabili.length} voli disponibili`;
+
+  if (prenotabili.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="padding:36px;text-align:center;color:var(--c-muted);">
+      <i class="bi bi-search" style="font-size:24px;display:block;margin-bottom:8px;" aria-hidden="true"></i>
+      Nessun volo prenotabile per i criteri selezionati.<br>
+      <span style="font-size:13px;">Prova con altre date o tratte.</span>
+    </td></tr>`;
+    return;
+  }
+
+  /* Confronto prezzi: trova il prezzo minimo per tratta */
+  const contaTratte = {};
+  const prezziMin   = {};
+  prenotabili.forEach(v => {
+    const tratta = `${v.origine}-${v.destinazione}`;
+    contaTratte[tratta] = (contaTratte[tratta] || 0) + 1;
+    const p = Number(v.prezzo_base || 100);
+    if (prezziMin[tratta] === undefined || p < prezziMin[tratta]) prezziMin[tratta] = p;
+  });
+
+  tbody.innerHTML = prenotabili.map(v => {
+    const tratta     = `${v.origine}-${v.destinazione}`;
+    const prezzoNum  = Number(v.prezzo_base || 100);
+    const miglior    = contaTratte[tratta] > 1 && prezzoNum === prezziMin[tratta];
+    const badgePrezzo = miglior
+      ? `<span class="badge-miglior-prezzo" title="Prezzo più basso su questa tratta">
+           <i class="bi bi-star-fill" aria-hidden="true"></i> Miglior prezzo
+         </span>`
+      : '';
+
+    let azione = '';
+    if (!LOGGED) {
+      azione = `<a href="/login" class="btn-action" style="font-size:12px;">Accedi per prenotare</a>`;
+    } else if (RUOLO === 'passeggero') {
+      azione = `<button class="btn-cta" style="font-size:12px;padding:5px 12px;"
+                  onclick="prenota(${v.id})">
+                  <i class="bi bi-cart-plus" aria-hidden="true"></i> Prenota
+                </button>`;
+    }
+
+    return `<tr>
+      <td><span class="codice-volo">${v.codice_volo}</span></td>
+      <td>${v.compagnia}</td>
+      <td><strong>${v.origine}</strong> <i class="bi bi-arrow-right" aria-hidden="true"></i> <strong>${v.destinazione}</strong></td>
+      <td style="white-space:nowrap;">${fmtDt(v.data_ora_partenza)}</td>
+      <td style="white-space:nowrap;">${fmtDt(v.data_ora_arrivo)}</td>
+      <td>${v.gate || '—'}</td>
+      <td>${v.posti_liberi}</td>
+      <td style="white-space:nowrap;">€${prezzoNum.toFixed(0)}${badgePrezzo}</td>
+      <td>${azione}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ─── Ricerca ─── */
+let tuttiIVoli = [];
+
+async function caricaMappaIniziale() {
+  if (!map) return;
+  try {
+    const { ok, data } = await apiFetch('/api/voli/attivi');
+    if (ok) aggiornaMappaVoli(data);
+  } catch (_) {
+    /* La mappa fallisce silenziosamente — non è un'operazione critica */
+  }
+}
+
+async function cercaVoli(evt) {
+  if (evt) evt.preventDefault();
+
+  const origine = document.getElementById('inp-origine').value.trim().toUpperCase();
+  const dest    = document.getElementById('inp-dest').value.trim().toUpperCase();
+  const data    = document.getElementById('inp-data').value;
+
+  const titolo = document.getElementById('results-title');
+  titolo.textContent = (origine || dest || data) ? 'Risultati ricerca' : 'Voli prenotabili';
+
+  /* Skeleton loading */
+  document.getElementById('flights-body').innerHTML =
+    `<tr><td colspan="9" style="padding:32px;text-align:center;">
+      <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+    </td></tr>`;
+
+  const params = new URLSearchParams();
+  if (origine) params.set('origine', origine);
+  if (dest)    params.set('destinazione', dest);
+  if (data)    params.set('data', data);
+
+  try {
+    const { ok, data: voli } = await apiFetch('/api/voli/search?' + params.toString());
+    if (!ok) throw new Error();
+    tuttiIVoli = voli;
+
+    /* Aggiorna mappa in un try separato: un errore Leaflet non deve bloccare la tabella */
+    try {
+      const voliAttivi = voli.filter(v => v.stato === 'programmato' || v.stato === 'partito');
+      aggiornaMappaVoli(voliAttivi);
+    } catch (_mapErr) { /* mappa non critica */ }
+
+    renderTabella(voli);
+  } catch (_) {
+    showToast('Errore nel caricamento dei voli.', 'error');
+    document.getElementById('flights-body').innerHTML =
+      `<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--c-muted);">
+        Errore nel caricamento. Riprova tra qualche istante.
+      </td></tr>`;
+  }
+}
+
+async function prenota(voloId) {
+  const { ok, data } = await apiFetch('/api/prenota', {
+    method: 'POST',
+    body: JSON.stringify({ volo_id: voloId })
+  });
+  if (ok) {
+    showToast(`Prenotazione ${data.codice_prenotazione} effettuata!`);
+    cercaVoli(null);
+  } else {
+    showToast(data.errore || 'Errore durante la prenotazione.', 'error');
+  }
+}
+
+/* ─── Avvio ───
+   Gli script sono in fondo al <body>: il DOM è già disponibile, non serve
+   DOMContentLoaded. Chiamiamo le funzioni direttamente. */
+if (typeof L !== 'undefined') {
+  /* Leaflet caricato correttamente: inizializza la mappa */
+  if (initMap()) {
+    caricaMappaIniziale();
+  }
+} else {
+  /* Leaflet non disponibile (CDN irraggiungibile): mostra il fallback */
+  mostraFallbackMappa();
+}
+
+/* Carica la tabella dei voli prenotabili */
+cercaVoli(null);
+</script>
+{% endblock %}

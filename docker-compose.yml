@@ -1,0 +1,13 @@
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      # Il file aeroporto.db viene salvato nella cartella locale ./data/
+      # così sopravvive al riavvio del container (persistenza del database)
+      - ./data:/app/data
+    environment:
+      # Cambiare questa chiave in un ambiente di produzione reale
+      - SECRET_KEY=chiave-super-segreta-aeroporto-cambiarla-in-produzione
+    restart: unless-stopped

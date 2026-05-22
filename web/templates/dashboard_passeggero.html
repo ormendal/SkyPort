@@ -1,0 +1,905 @@
+{% extends "base.html" %}
+{% block title %}Le mie prenotazioni{% endblock %}
+
+{% block content %}
+
+<!-- ── Banner promemoria partenza ── -->
+<div id="promemoria-banner" class="promemoria-banner" style="display:none;"
+     role="status" aria-live="polite">
+  <div class="page-wrap" style="padding-top:var(--sp-4);padding-bottom:var(--sp-4);">
+    <div class="promemoria-inner">
+      <div class="promemoria-icon">
+        <i class="bi bi-airplane-fill" aria-hidden="true"></i>
+      </div>
+      <div class="promemoria-content">
+        <div class="promemoria-titolo">
+          Il tuo prossimo volo <strong id="prm-volo">—</strong> per
+          <strong id="prm-destinazione">—</strong> parte alle
+          <strong id="prm-orario">—</strong>
+          <span id="prm-ritardo-badge" style="display:none;"
+                class="badge-stato badge-partito" aria-label="Orario aggiornato">
+            Orario aggiornato
+          </span>
+        </div>
+        <div class="promemoria-countdown" id="prm-countdown">–</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Corpo principale ── -->
+<div class="page-wrap">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">
+        <i class="bi bi-ticket-perforated-fill" aria-hidden="true"></i>
+        Le mie prenotazioni
+      </h1>
+      <p class="page-subtitle">Benvenuto, <strong>{{ session.username }}</strong></p>
+    </div>
+    <div style="display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap;">
+      <!-- Wallet crediti -->
+      <div class="wallet-box">
+        <div>
+          <div class="wallet-label">Crediti</div>
+          <div class="wallet-amount" id="wallet-amount">…</div>
+        </div>
+        <button class="btn-action" style="font-size:12px;" onclick="openModal('modal-ricarica')"
+                aria-haspopup="dialog">
+          <i class="bi bi-plus-circle" aria-hidden="true"></i> Ricarica
+        </button>
+      </div>
+      <button class="btn-action" onclick="apriProfilo()" aria-haspopup="dialog">
+        <i class="bi bi-person-gear" aria-hidden="true"></i> Modifica profilo
+      </button>
+      <a href="/" class="btn-cta">
+        <i class="bi bi-search" aria-hidden="true"></i> Cerca voli
+      </a>
+    </div>
+  </div>
+
+  <!-- Tabs prenotazioni / storico -->
+  <div class="dash-tabs" role="tablist">
+    <button class="dash-tab active" id="tab-pren" role="tab" aria-selected="true"
+            aria-controls="panel-pren" onclick="switchTab('pren')">
+      <i class="bi bi-ticket-perforated" aria-hidden="true"></i> Prenotazioni
+    </button>
+    <button class="dash-tab" id="tab-storico" role="tab" aria-selected="false"
+            aria-controls="panel-storico" onclick="switchTab('storico')">
+      <i class="bi bi-clock-history" aria-hidden="true"></i> I miei viaggi
+    </button>
+  </div>
+
+  <!-- Panel: Prenotazioni attive -->
+  <div id="panel-pren" role="tabpanel" aria-labelledby="tab-pren">
+    <div class="app-table-wrap">
+      <table class="app-table" id="pren-table" aria-label="Le mie prenotazioni">
+        <thead>
+          <tr>
+            <th scope="col">PNR</th>
+            <th scope="col">Volo</th>
+            <th scope="col">Tratta</th>
+            <th scope="col">Partenza</th>
+            <th scope="col">Compagnia</th>
+            <th scope="col">Prezzo</th>
+            <th scope="col">Stato</th>
+            <th scope="col">Posto</th>
+            <th scope="col"><span class="visually-hidden">Azioni</span></th>
+          </tr>
+        </thead>
+        <tbody id="pren-body">
+          <tr><td colspan="9" style="padding:32px;text-align:center;">
+            <span class="skeleton" style="width:260px;height:16px;">&nbsp;</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Panel: Storico viaggi -->
+  <div id="panel-storico" role="tabpanel" aria-labelledby="tab-storico" style="display:none;">
+    <div class="app-table-wrap">
+      <table class="app-table" id="storico-table" aria-label="I miei viaggi passati">
+        <thead>
+          <tr>
+            <th scope="col">Volo</th>
+            <th scope="col">Tratta</th>
+            <th scope="col">Data</th>
+            <th scope="col">Compagnia</th>
+            <th scope="col">Posto</th>
+            <th scope="col">Valutazione</th>
+          </tr>
+        </thead>
+        <tbody id="storico-body">
+          <tr><td colspan="6" style="padding:32px;text-align:center;">
+            <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /.page-wrap -->
+
+<!-- ══════════════════════════════════════════
+     MODALI
+══════════════════════════════════════════ -->
+
+<!-- Modal: Ricarica crediti -->
+<div id="modal-ricarica" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="ricarica-title">
+  <div class="modal-panel" style="max-width:400px;">
+    <div class="modal-header">
+      <h2 id="ricarica-title">
+        <i class="bi bi-plus-circle-fill" aria-hidden="true"></i> Ricarica crediti
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-ricarica')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <form id="form-ricarica" onsubmit="eseguiRicarica(event)" novalidate>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:var(--sp-4);">
+        <div class="form-group">
+          <label class="app-label" for="r-importo">Importo (€)</label>
+          <input id="r-importo" class="app-input" type="number" min="1" max="5000" step="0.01"
+                 required placeholder="es. 200">
+        </div>
+        <div id="ricarica-error" class="form-error-msg" role="alert" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn-cta">
+          <i class="bi bi-check-lg" aria-hidden="true"></i> Conferma ricarica
+        </button>
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-ricarica')">Annulla</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Conferma cancellazione prenotazione -->
+<div id="modal-cancella" class="modal-overlay" role="alertdialog" aria-modal="true"
+     aria-labelledby="cancella-title">
+  <div class="modal-panel" style="max-width:440px;">
+    <div class="modal-header">
+      <h2 id="cancella-title" style="color:var(--c-danger);">
+        <i class="bi bi-x-circle-fill" aria-hidden="true"></i> Cancella prenotazione
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-cancella')" aria-label="Annulla">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0 0 var(--sp-3);">
+        Stai cancellando la prenotazione <strong id="cancella-pnr">—</strong>.
+      </p>
+      <p class="text-sm text-muted" style="margin:0;">
+        Verrà applicata una penale del 10%. I crediti rimanenti saranno
+        reaccreditati sul tuo portafoglio.
+      </p>
+      <div id="cancella-error" class="form-error-msg" role="alert"
+           style="display:none;margin-top:var(--sp-4);"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-conferma-cancella" class="btn-danger-sm" style="padding:8px 16px;"
+              onclick="confermCancella()">
+        <i class="bi bi-x-circle" aria-hidden="true"></i> Cancella prenotazione
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-cancella')">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Carta d'imbarco -->
+<div id="modal-bp" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="bp-title">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h2 id="bp-title">
+        <i class="bi bi-ticket-perforated" aria-hidden="true"></i> Carta d'imbarco
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-bp')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="boarding-pass" id="bp-content" aria-live="polite"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal('modal-bp')">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Ricevuta di pagamento -->
+<div id="modal-ricevuta" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="ricevuta-title">
+  <div class="modal-panel" style="max-width:520px;">
+    <div class="modal-header">
+      <h2 id="ricevuta-title">
+        <i class="bi bi-receipt" aria-hidden="true"></i> Ricevuta di pagamento
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-ricevuta')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body" id="ricevuta-content" aria-live="polite"></div>
+    <div class="modal-footer">
+      <button class="btn-cta" onclick="window.print()">
+        <i class="bi bi-printer-fill" aria-hidden="true"></i> Stampa
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-ricevuta')">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Scelta posto check-in online -->
+<div id="modal-checkin-seat" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="checkin-seat-title">
+  <div class="modal-panel" style="max-width:660px;">
+    <div class="modal-header">
+      <h2 id="checkin-seat-title">
+        <i class="bi bi-qr-code-scan" aria-hidden="true"></i> Check-in online — Scelta posto
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-checkin-seat')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="text-sm text-muted" style="margin-bottom:var(--sp-4);">
+        Clicca su un posto libero per selezionarlo. Puoi anche confermare senza scegliere
+        (verrà assegnato automaticamente il primo posto disponibile).
+      </p>
+      <div id="seat-map-checkin" class="seat-map-wrap"></div>
+      <p id="checkin-posto-sel" style="margin-top:var(--sp-3);font-size:13px;color:var(--c-muted);">
+        Nessun posto selezionato — assegnazione automatica.
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-conferma-checkin" class="btn-cta" onclick="confermCheckinSeat()">
+        <i class="bi bi-check-lg" aria-hidden="true"></i> Conferma check-in
+      </button>
+      <button class="btn-ghost" onclick="closeModal('modal-checkin-seat')">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Modifica profilo -->
+<div id="modal-profilo" class="modal-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="profilo-title">
+  <div class="modal-panel" style="max-width:520px;">
+    <div class="modal-header">
+      <h2 id="profilo-title">
+        <i class="bi bi-person-gear" aria-hidden="true"></i> Modifica profilo
+      </h2>
+      <button class="btn-ghost" onclick="closeModal('modal-profilo')" aria-label="Chiudi">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+    <form id="form-profilo" onsubmit="salvaProfilo(event)" novalidate>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:var(--sp-6);">
+
+        <div>
+          <p class="section-label" style="margin:0 0 var(--sp-4);">
+            <i class="bi bi-person" aria-hidden="true"></i> Dati anagrafici
+          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+            <div class="form-group">
+              <label class="app-label" for="p-nome">Nome</label>
+              <input id="p-nome" class="app-input" type="text" required autocomplete="given-name">
+            </div>
+            <div class="form-group">
+              <label class="app-label" for="p-cognome">Cognome</label>
+              <input id="p-cognome" class="app-input" type="text" required autocomplete="family-name">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="p-documento">Documento</label>
+            <input id="p-documento" class="app-input" type="text" required autocomplete="off">
+            <p style="margin:4px 0 0;font-size:12px;color:var(--c-muted);">Deve essere univoco.</p>
+          </div>
+        </div>
+
+        <div>
+          <p class="section-label" style="margin:0 0 var(--sp-4);">
+            <i class="bi bi-shield-lock" aria-hidden="true"></i> Credenziali
+          </p>
+          <div class="form-group">
+            <label class="app-label" for="p-username">Username</label>
+            <input id="p-username" class="app-input" type="text" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="p-pw-attuale">
+              Password attuale
+              <span style="font-weight:400;text-transform:none;">(richiesta per cambiarla)</span>
+            </label>
+            <input id="p-pw-attuale" class="app-input" type="password" autocomplete="current-password">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);">
+            <div class="form-group">
+              <label class="app-label" for="p-pw-nuova">Nuova password</label>
+              <input id="p-pw-nuova" class="app-input" type="password" minlength="8"
+                     autocomplete="new-password" placeholder="min. 8 caratteri">
+            </div>
+            <div class="form-group">
+              <label class="app-label" for="p-pw-conferma">Conferma password</label>
+              <input id="p-pw-conferma" class="app-input" type="password" autocomplete="new-password">
+            </div>
+          </div>
+        </div>
+
+        <div id="profilo-error" class="form-error-msg" role="alert" style="display:none;"></div>
+        <div id="profilo-success" class="form-success-msg" role="status" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn-cta">
+          <i class="bi bi-check-lg" aria-hidden="true"></i> Salva modifiche
+        </button>
+        <button type="button" class="btn-ghost" onclick="closeModal('modal-profilo')">Annulla</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ─── Helpers ─── */
+function fmtDt(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'numeric' }) +
+         ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtEuro(n) {
+  return new Intl.NumberFormat('it-IT', { style:'currency', currency:'EUR' }).format(n);
+}
+
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+/* ─── Carta d'imbarco ─── */
+function mostraCarta(p) {
+  document.getElementById('bp-content').innerHTML = `
+    <div class="bp-header">
+      <div>
+        <div class="bp-flight-code">${p.codice_volo}</div>
+        <div class="bp-company">${p.compagnia}</div>
+      </div>
+      <span class="badge-stato badge-imbarcato">Imbarcato</span>
+    </div>
+    <div class="bp-route">
+      <div class="bp-iata">${p.origine}</div>
+      <div class="bp-arrow"><i class="bi bi-arrow-right-circle" aria-hidden="true"></i></div>
+      <div class="bp-iata">${p.destinazione}</div>
+    </div>
+    <div class="bp-info-grid">
+      <div class="bp-info-cell">
+        <div class="bp-info-label">Partenza</div>
+        <div class="bp-info-value">${fmtDt(p.data_ora_partenza)}</div>
+      </div>
+      <div class="bp-info-cell">
+        <div class="bp-info-label">Gate</div>
+        <div class="bp-info-value">${p.gate_imbarco_id ? 'G' + p.gate_imbarco_id : '—'}</div>
+      </div>
+      <div class="bp-info-cell">
+        <div class="bp-info-label">Posto</div>
+        <div class="bp-info-value bp-seat-highlight">${p.numero_posto || '—'}</div>
+      </div>
+      <div class="bp-info-cell" style="grid-column:1/-1;">
+        <div class="bp-info-label">PNR</div>
+        <div class="bp-info-value">${p.codice_prenotazione}</div>
+      </div>
+    </div>`;
+  openModal('modal-bp');
+}
+
+/* ─── Ricevuta di pagamento ─── */
+function mostraRicevuta(r) {
+  document.getElementById('ricevuta-content').innerHTML = `
+    <div class="ricevuta-card">
+      <div class="ricevuta-header">
+        <div class="ricevuta-titolo">
+          <i class="bi bi-receipt" aria-hidden="true"></i> Ricevuta SkyPort
+        </div>
+        <div class="ricevuta-id">${r.transazione_id}</div>
+      </div>
+      <div class="ricevuta-route">
+        <div class="ricevuta-iata">${r.origine}</div>
+        <div style="color:var(--c-muted);font-size:20px;padding:0 var(--sp-2);">
+          <i class="bi bi-arrow-right-circle" aria-hidden="true"></i>
+        </div>
+        <div class="ricevuta-iata">${r.destinazione}</div>
+        <div style="margin-left:var(--sp-4);">
+          <div style="font-size:12px;color:var(--c-muted);">${r.compagnia}</div>
+          <div style="font-size:16px;font-weight:700;color:var(--c-ink);">${r.codice_volo}</div>
+        </div>
+      </div>
+      <div class="ricevuta-grid">
+        <div class="ricevuta-cell">
+          <div class="ricevuta-cell-label">PNR</div>
+          <div class="ricevuta-cell-value">${r.codice_prenotazione}</div>
+        </div>
+        <div class="ricevuta-cell">
+          <div class="ricevuta-cell-label">Data partenza</div>
+          <div class="ricevuta-cell-value">${fmtDt(r.data_ora_partenza)}</div>
+        </div>
+        <div class="ricevuta-cell">
+          <div class="ricevuta-cell-label">Data pagamento</div>
+          <div class="ricevuta-cell-value">${r.data_pagamento}</div>
+        </div>
+        <div class="ricevuta-cell">
+          <div class="ricevuta-cell-label">Importo pagato</div>
+          <div class="ricevuta-cell-value highlight">${fmtEuro(r.prezzo)}</div>
+        </div>
+      </div>
+    </div>`;
+  openModal('modal-ricevuta');
+}
+
+/* ─── Prenotazioni ─── */
+function renderPrenotazioni(lista) {
+  const tbody = document.getElementById('pren-body');
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--c-muted);">
+      <i class="bi bi-inbox" style="font-size:32px;display:block;margin-bottom:8px;" aria-hidden="true"></i>
+      Nessuna prenotazione. <a href="/">Cerca un volo</a> per iniziare.
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = lista.map(p => {
+    const stato = p.stato;
+    const badge = `<span class="badge-stato badge-${stato}">${stato}</span>`;
+    const posto = p.numero_posto
+      ? `<span class="codice-volo" style="font-size:13px;">${p.numero_posto}</span>`
+      : '<span class="text-muted text-sm">—</span>';
+
+    let azioni = '';
+    if (stato === 'prenotata') {
+      azioni = `<div style="display:flex;gap:4px;">
+                  <button class="btn-cta" style="font-size:12px;padding:4px 10px;"
+                    onclick="paga(${p.id})">
+                    <i class="bi bi-credit-card" aria-hidden="true"></i> Paga
+                  </button>
+                  <button class="btn-ghost" style="color:var(--c-danger);font-size:13px;"
+                    onclick="apriCancella(${p.id}, '${p.codice_prenotazione}')"
+                    title="Cancella prenotazione">
+                    <i class="bi bi-x-circle" aria-hidden="true"></i>
+                  </button>
+                </div>`;
+    } else if (stato === 'pagata') {
+      azioni = `<button class="btn-action" style="font-size:12px;"
+                  onclick="checkinOnline(${p.id}, ${p.volo_id})">
+                  <i class="bi bi-qr-code-scan" aria-hidden="true"></i> Check-in
+                </button>`;
+    } else if (stato === 'imbarcato') {
+      azioni = `<button class="btn-action" style="font-size:12px;"
+                  onclick='mostraCarta(${JSON.stringify(p)})'>
+                  <i class="bi bi-ticket-perforated" aria-hidden="true"></i> Carta
+                </button>`;
+    }
+
+    return `<tr id="pren-row-${p.id}">
+      <td><span class="codice-volo" style="font-size:13px;">${p.codice_prenotazione}</span></td>
+      <td><span class="codice-volo">${p.codice_volo}</span></td>
+      <td><strong>${p.origine}</strong> → <strong>${p.destinazione}</strong></td>
+      <td style="white-space:nowrap;">${fmtDt(p.data_ora_partenza)}</td>
+      <td>${p.compagnia}</td>
+      <td style="white-space:nowrap;">${fmtEuro(p.prezzo)}</td>
+      <td>${badge}</td>
+      <td>${posto}</td>
+      <td>${azioni}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function caricaPrenotazioni() {
+  const { ok, data } = await apiFetch('/api/mie_prenotazioni');
+  if (ok) {
+    renderPrenotazioni(data);
+    aggiornaPromemoria(data);
+  } else {
+    showToast('Errore nel caricamento delle prenotazioni.', 'error');
+  }
+}
+
+async function paga(id) {
+  const { ok, data } = await apiFetch(`/api/paga/${id}`, { method: 'POST' });
+  if (ok) {
+    showToast('Pagamento completato.');
+    caricaPrenotazioni();
+    caricaCrediti();
+    if (data.ricevuta) mostraRicevuta(data.ricevuta);
+  } else {
+    showToast(data.errore || 'Errore nel pagamento.', 'error');
+  }
+}
+
+/* ─── Check-in online con seat map ─── */
+let _checkinPrenId  = null;
+let _postoSelezionato = null;
+
+async function checkinOnline(prenotazioneId, voloId) {
+  _checkinPrenId    = prenotazioneId;
+  _postoSelezionato = null;
+
+  document.getElementById('seat-map-checkin').innerHTML =
+    '<div style="padding:24px;text-align:center;color:var(--c-muted);">Caricamento posti…</div>';
+  document.getElementById('checkin-posto-sel').textContent =
+    'Nessun posto selezionato — assegnazione automatica.';
+  document.getElementById('btn-conferma-checkin').disabled = false;
+
+  openModal('modal-checkin-seat');
+
+  const { ok, data } = await apiFetch(`/api/voli/${voloId}/posti`);
+  if (!ok) {
+    document.getElementById('seat-map-checkin').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--c-danger);">Errore nel caricamento dei posti.</div>';
+    return;
+  }
+  renderSeatMapCheckin(data);
+}
+
+function renderSeatMapCheckin(dati) {
+  const occupati = new Set(dati.posti_occupati || []);
+  const lettere  = dati.lettere_per_riga || ['A','B','C','D','E','F'];
+  const righe    = dati.righe || 1;
+  const totale   = dati.posti_totali || 0;
+
+  let html = `<div class="seat-map">
+    <div class="seat-col-header">
+      <div class="seat-row-label" style="visibility:hidden;">0</div>`;
+  lettere.forEach((l, i) => {
+    if (i === 3) html += `<div class="seat-col-label-aisle"></div>`;
+    html += `<div class="seat-col-label">${l}</div>`;
+  });
+  html += '</div>';
+
+  let contatore = 0;
+  for (let r = 1; r <= righe; r++) {
+    html += `<div class="seat-row"><div class="seat-row-label">${r}</div>`;
+    lettere.forEach((l, i) => {
+      if (i === 3) html += `<div class="seat-aisle"></div>`;
+      const codice = `${r}${l}`;
+      contatore++;
+      if (contatore > totale) { html += `<div style="width:30px;height:30px;"></div>`; return; }
+      if (occupati.has(codice)) {
+        html += `<div class="seat seat-occupied" title="${codice} — occupato" aria-label="${codice} occupato">
+                   <i class="bi bi-x" style="font-size:10px;"></i>
+                 </div>`;
+      } else {
+        html += `<div class="seat seat-free" id="seat-${codice}"
+                      onclick="selezionaPosto('${codice}')"
+                      role="button" tabindex="0"
+                      aria-label="Posto ${codice} libero"
+                      title="${codice}">
+                   ${codice}
+                 </div>`;
+      }
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+
+  document.getElementById('seat-map-checkin').innerHTML = html;
+}
+
+function selezionaPosto(codice) {
+  /* Deseleziona il precedente */
+  if (_postoSelezionato) {
+    const prev = document.getElementById(`seat-${_postoSelezionato}`);
+    if (prev) prev.className = 'seat seat-free';
+  }
+  _postoSelezionato = codice;
+  const el = document.getElementById(`seat-${codice}`);
+  if (el) el.className = 'seat seat-selected';
+  document.getElementById('checkin-posto-sel').textContent = `Posto selezionato: ${codice}`;
+}
+
+async function confermCheckinSeat() {
+  if (!_checkinPrenId) return;
+  const btn = document.getElementById('btn-conferma-checkin');
+  btn.disabled = true;
+
+  const body = _postoSelezionato ? { numero_posto: _postoSelezionato } : {};
+  const { ok, data } = await apiFetch(`/api/checkin_online/${_checkinPrenId}`, {
+    method: 'POST',
+    body:   JSON.stringify(body)
+  });
+  btn.disabled = false;
+
+  if (ok) {
+    showToast(`Check-in completato — posto ${data.numero_posto}`);
+    closeModal('modal-checkin-seat');
+    caricaPrenotazioni();
+  } else {
+    showToast(data.errore || 'Errore nel check-in.', 'error');
+    btn.disabled = false;
+  }
+}
+
+/* ─── Modifica profilo ─── */
+async function apriProfilo() {
+  const errEl  = document.getElementById('profilo-error');
+  const succEl = document.getElementById('profilo-success');
+  errEl.style.display  = 'none';
+  succEl.style.display = 'none';
+  document.getElementById('form-profilo').reset();
+
+  const { ok, data } = await apiFetch('/api/passeggero/profilo');
+  if (ok) {
+    document.getElementById('p-nome').value      = data.nome      || '';
+    document.getElementById('p-cognome').value   = data.cognome   || '';
+    document.getElementById('p-documento').value = data.documento || '';
+    document.getElementById('p-username').value  = data.username  || '';
+  }
+  openModal('modal-profilo');
+}
+
+async function salvaProfilo(evt) {
+  evt.preventDefault();
+  const errEl  = document.getElementById('profilo-error');
+  const succEl = document.getElementById('profilo-success');
+  errEl.style.display  = 'none';
+  succEl.style.display = 'none';
+
+  const nome              = document.getElementById('p-nome').value.trim();
+  const cognome           = document.getElementById('p-cognome').value.trim();
+  const documento         = document.getElementById('p-documento').value.trim();
+  const username          = document.getElementById('p-username').value.trim();
+  const password_attuale  = document.getElementById('p-pw-attuale').value;
+  const nuova_password    = document.getElementById('p-pw-nuova').value;
+  const conferma_password = document.getElementById('p-pw-conferma').value;
+
+  if (!nome || !cognome || !documento) {
+    errEl.textContent   = 'Nome, cognome e documento sono obbligatori.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  /* Verifica lunghezza minima nuova password (solo se l'utente vuole cambiarla) */
+  if (nuova_password && nuova_password.length < 8) {
+    errEl.textContent   = 'La nuova password deve essere di almeno 8 caratteri.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+
+  const payload = { nome, cognome, documento, username };
+  if (nuova_password) {
+    payload.password_attuale  = password_attuale;
+    payload.nuova_password    = nuova_password;
+    payload.conferma_password = conferma_password;
+  }
+
+  const { ok, data } = await apiFetch('/api/passeggero/profilo', {
+    method: 'PUT', body: JSON.stringify(payload)
+  });
+  btn.disabled = false;
+
+  if (ok) {
+    succEl.textContent   = `Profilo aggiornato: ${data.nome} ${data.cognome} — @${data.username}`;
+    succEl.style.display = 'block';
+    document.getElementById('p-pw-attuale').value  = '';
+    document.getElementById('p-pw-nuova').value    = '';
+    document.getElementById('p-pw-conferma').value = '';
+    showToast('Profilo aggiornato con successo.');
+  } else {
+    errEl.textContent   = data.errore || 'Errore durante l\'aggiornamento del profilo.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Tabs ─── */
+function switchTab(tab) {
+  document.getElementById('panel-pren').style.display    = tab === 'pren'    ? '' : 'none';
+  document.getElementById('panel-storico').style.display = tab === 'storico' ? '' : 'none';
+  document.getElementById('tab-pren').classList.toggle('active', tab === 'pren');
+  document.getElementById('tab-storico').classList.toggle('active', tab === 'storico');
+  document.getElementById('tab-pren').setAttribute('aria-selected', tab === 'pren');
+  document.getElementById('tab-storico').setAttribute('aria-selected', tab === 'storico');
+  if (tab === 'storico') caricaStorico();
+}
+
+/* ─── Wallet ─── */
+async function caricaCrediti() {
+  const { ok, data } = await apiFetch('/api/passeggero/crediti');
+  if (ok) {
+    document.getElementById('wallet-amount').textContent =
+      new Intl.NumberFormat('it-IT', { style:'currency', currency:'EUR' }).format(data.crediti);
+  }
+}
+
+async function eseguiRicarica(evt) {
+  evt.preventDefault();
+  const errEl = document.getElementById('ricarica-error');
+  errEl.style.display = 'none';
+  const importo = parseFloat(document.getElementById('r-importo').value);
+  if (!importo || importo <= 0) {
+    errEl.textContent   = 'Inserisci un importo valido.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  const { ok, data } = await apiFetch('/api/passeggero/ricarica', {
+    method: 'POST', body: JSON.stringify({ importo })
+  });
+  btn.disabled = false;
+  if (ok) {
+    showToast(`Ricarica effettuata. Saldo: ${new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(data.crediti)}`);
+    closeModal('modal-ricarica');
+    document.getElementById('form-ricarica').reset();
+    caricaCrediti();
+  } else {
+    errEl.textContent   = data.errore || 'Errore durante la ricarica.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Cancella prenotazione ─── */
+let _cancellaId = null;
+
+function apriCancella(id, pnr) {
+  _cancellaId = id;
+  document.getElementById('cancella-pnr').textContent = pnr;
+  document.getElementById('cancella-error').style.display = 'none';
+  openModal('modal-cancella');
+}
+
+async function confermCancella() {
+  if (!_cancellaId) return;
+  const btn   = document.getElementById('btn-conferma-cancella');
+  const errEl = document.getElementById('cancella-error');
+  btn.disabled = true; errEl.style.display = 'none';
+
+  const { ok, data } = await apiFetch(`/api/cancella/${_cancellaId}`, { method: 'POST' });
+  btn.disabled = false;
+
+  if (ok) {
+    showToast('Prenotazione cancellata. Crediti parzialmente rimborsati.');
+    closeModal('modal-cancella');
+    _cancellaId = null;
+    caricaPrenotazioni();
+    caricaCrediti();
+  } else {
+    errEl.textContent   = data.errore || 'Errore durante la cancellazione.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ─── Storico e valutazioni ─── */
+function renderStelle(prenId, valAttuale) {
+  const stelle = [1, 2, 3, 4, 5].map(n => {
+    const piena = n <= (valAttuale || 0);
+    return `<span class="star ${piena ? 'filled' : ''}"
+                  onclick="valuta(${prenId}, ${n})"
+                  role="button" tabindex="0" aria-label="${n} stelle">${piena ? '★' : '☆'}</span>`;
+  }).join('');
+  return `<span class="star-rating" data-pren="${prenId}">${stelle}</span>`;
+}
+
+function renderStorico(lista) {
+  const tbody = document.getElementById('storico-body');
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--c-muted);">
+      <i class="bi bi-airplane" style="font-size:28px;display:block;margin-bottom:8px;" aria-hidden="true"></i>
+      Nessun viaggio completato.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = lista.map(p => `<tr>
+    <td><span class="codice-volo">${p.codice_volo}</span></td>
+    <td><strong>${p.origine}</strong> → <strong>${p.destinazione}</strong></td>
+    <td style="white-space:nowrap;">${fmtDt(p.data_ora_partenza)}</td>
+    <td>${p.compagnia}</td>
+    <td>${p.numero_posto || '—'}</td>
+    <td>${renderStelle(p.prenotazione_id, p.valutazione)}</td>
+  </tr>`).join('');
+}
+
+async function caricaStorico() {
+  document.getElementById('storico-body').innerHTML =
+    `<tr><td colspan="6" style="padding:24px;text-align:center;">
+      <span class="skeleton" style="width:200px;height:16px;">&nbsp;</span>
+    </td></tr>`;
+  const { ok, data } = await apiFetch('/api/passeggero/storico');
+  if (ok) renderStorico(data);
+  else showToast('Errore nel caricamento dello storico.', 'error');
+}
+
+async function valuta(prenId, stelle) {
+  const { ok, data } = await apiFetch(`/api/passeggero/valuta/${prenId}`, {
+    method: 'POST', body: JSON.stringify({ valutazione: stelle })
+  });
+  if (ok) {
+    const wrap = document.querySelector(`.star-rating[data-pren="${prenId}"]`);
+    if (wrap) wrap.outerHTML = renderStelle(prenId, stelle);
+    showToast('Valutazione salvata.');
+  } else {
+    showToast(data.errore || 'Errore salvataggio valutazione.', 'error');
+  }
+}
+
+/* ─── Promemoria partenza ─── */
+let _countdownInterval = null;
+
+function aggiornaPromemoria(prenotazioni) {
+  const ora   = new Date();
+  const limit = new Date(ora.getTime() + 24 * 60 * 60 * 1000);
+
+  const imminenti = prenotazioni
+    .filter(p => ['pagata', 'imbarcato'].includes(p.stato))
+    .filter(p => {
+      const orario = p.orario_stimato || p.data_ora_partenza;
+      if (!orario) return false;
+      const d = new Date(orario.replace(' ', 'T'));
+      return d >= ora && d <= limit;
+    })
+    .sort((a, b) => {
+      const da = new Date((a.orario_stimato || a.data_ora_partenza).replace(' ', 'T'));
+      const db = new Date((b.orario_stimato || b.data_ora_partenza).replace(' ', 'T'));
+      return da - db;
+    });
+
+  const banner = document.getElementById('promemoria-banner');
+  if (imminenti.length === 0) {
+    banner.style.display = 'none';
+    if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
+    return;
+  }
+
+  const p      = imminenti[0];
+  const orario = p.orario_stimato || p.data_ora_partenza;
+  const partenzaDt = new Date(orario.replace(' ', 'T'));
+
+  banner.style.display = '';
+  document.getElementById('prm-volo').textContent        = p.codice_volo;
+  document.getElementById('prm-destinazione').textContent = p.destinazione;
+  document.getElementById('prm-orario').textContent      =
+    partenzaDt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('prm-ritardo-badge').style.display = p.orario_stimato ? '' : 'none';
+
+  if (_countdownInterval) clearInterval(_countdownInterval);
+
+  function tick() {
+    const adesso = new Date();
+    const diff   = partenzaDt - adesso;
+    const el     = document.getElementById('prm-countdown');
+
+    if (diff <= 0) {
+      /* Volo già partito o passato */
+      if (diff < -10 * 60 * 1000) {
+        /* Più di 10 minuti fa: nascondi il banner */
+        banner.style.display = 'none';
+        clearInterval(_countdownInterval);
+      } else {
+        el.textContent = 'Il volo è partito';
+        el.className   = 'promemoria-countdown';
+      }
+      return;
+    }
+
+    const ore = Math.floor(diff / 3600000);
+    const min = Math.floor((diff % 3600000) / 60000);
+    const sec = Math.floor((diff % 60000) / 1000);
+    el.textContent = `${String(ore).padStart(2,'0')}h ${String(min).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`;
+    /* Urgenza: meno di 2 ore */
+    el.className = diff < 2 * 3600000 ? 'promemoria-countdown urgente' : 'promemoria-countdown';
+  }
+
+  tick();
+  _countdownInterval = setInterval(tick, 1000);
+}
+
+/* ─── Avvio ─── */
+caricaPrenotazioni();
+caricaCrediti();
+</script>
+{% endblock %}

@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Accedi{% endblock %}
+
+{% block content %}
+<div class="login-page">
+  <div class="login-grid">
+
+    <!-- Login -->
+    <div class="app-card">
+      <div class="app-card-header">
+        <span><i class="bi bi-person-fill-lock" aria-hidden="true"></i> Accedi</span>
+      </div>
+      <div class="app-card-body">
+        <form id="form-login" onsubmit="doLogin(event)" novalidate aria-label="Modulo di accesso">
+          <div class="form-group">
+            <label class="app-label" for="login-username">Username</label>
+            <input id="login-username" class="app-input" type="text"
+                   autocomplete="username" required
+                   placeholder="es. mario.rossi">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="login-password">Password</label>
+            <input id="login-password" class="app-input" type="password"
+                   autocomplete="current-password" required>
+          </div>
+          <div id="login-error" class="form-error-msg" role="alert"
+               style="display:none;margin-bottom:var(--sp-3);"></div>
+          <button type="submit" class="btn-cta" style="width:100%;justify-content:center;">
+            <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i> Accedi
+          </button>
+        </form>
+
+        <div class="login-divider">Credenziali demo</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2);">
+          <button class="btn-action" style="justify-content:center;font-size:12px;"
+                  onclick="fillLogin('mario.rossi')">mario.rossi</button>
+          <button class="btn-action" style="justify-content:center;font-size:12px;"
+                  onclick="fillLogin('roberto.galli')">roberto.galli</button>
+          <button class="btn-action" style="justify-content:center;font-size:12px;"
+                  onclick="fillLogin('compagnia1')">compagnia1</button>
+          <button class="btn-action" style="justify-content:center;font-size:12px;"
+                  onclick="fillLogin('compagnia3')">compagnia3</button>
+          <button class="btn-action" style="justify-content:center;font-size:12px;"
+                  onclick="fillLogin('operatore1')">operatore1</button>
+          <button class="btn-action" style="justify-content:center;font-size:12px;"
+                  onclick="fillLogin('admin')">admin</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Registrazione -->
+    <div class="app-card">
+      <div class="app-card-header">
+        <span><i class="bi bi-person-plus-fill" aria-hidden="true"></i> Registrati</span>
+      </div>
+      <div class="app-card-body">
+        <form id="form-reg" onsubmit="doRegistra(event)" novalidate aria-label="Modulo di registrazione">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3);">
+            <div class="form-group">
+              <label class="app-label" for="reg-nome">Nome</label>
+              <input id="reg-nome" class="app-input" type="text" required
+                     autocomplete="given-name" placeholder="Mario">
+            </div>
+            <div class="form-group">
+              <label class="app-label" for="reg-cognome">Cognome</label>
+              <input id="reg-cognome" class="app-input" type="text" required
+                     autocomplete="family-name" placeholder="Rossi">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="reg-documento">Documento</label>
+            <input id="reg-documento" class="app-input" type="text" required
+                   autocomplete="off" placeholder="IT12345 — deve essere univoco">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="reg-username">Username</label>
+            <input id="reg-username" class="app-input" type="text" required
+                   autocomplete="username" placeholder="mario.rossi">
+          </div>
+          <div class="form-group">
+            <label class="app-label" for="reg-password">Password</label>
+            <input id="reg-password" class="app-input" type="password" required
+                   autocomplete="new-password" minlength="8" placeholder="min. 8 caratteri">
+          <div id="reg-password-hint" style="display:none;margin-top:4px;font-size:12px;color:var(--c-danger);">
+            La password deve essere di almeno 8 caratteri.
+          </div>
+          </div>
+          <div id="reg-error" class="form-error-msg" role="alert"
+               style="display:none;margin-bottom:var(--sp-3);"></div>
+          <button type="submit" class="btn-cta" style="width:100%;justify-content:center;">
+            <i class="bi bi-person-check-fill" aria-hidden="true"></i> Crea account
+          </button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fillLogin(user) {
+  document.getElementById('login-username').value = user;
+  document.getElementById('login-password').value = 'password';
+}
+
+/* Mostra/nascondi suggerimento lunghezza password in tempo reale */
+document.getElementById('reg-password').addEventListener('input', function () {
+  const hint = document.getElementById('reg-password-hint');
+  hint.style.display = this.value.length > 0 && this.value.length < 8 ? 'block' : 'none';
+});
+
+async function doLogin(evt) {
+  evt.preventDefault();
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!username || !password) {
+    errEl.textContent = 'Username e password obbligatori.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+
+  const { ok, data } = await apiFetch('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password })
+  });
+
+  btn.disabled = false;
+
+  if (ok) {
+    showToast(data.messaggio || 'Accesso effettuato.');
+    setTimeout(() => { window.location.href = data.redirect || '/'; }, 400);
+  } else {
+    errEl.textContent = data.errore || 'Credenziali non valide.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function doRegistra(evt) {
+  evt.preventDefault();
+  const errEl = document.getElementById('reg-error');
+  errEl.style.display = 'none';
+
+  const payload = {
+    nome:       document.getElementById('reg-nome').value.trim(),
+    cognome:    document.getElementById('reg-cognome').value.trim(),
+    documento:  document.getElementById('reg-documento').value.trim(),
+    username:   document.getElementById('reg-username').value.trim(),
+    password:   document.getElementById('reg-password').value,
+  };
+
+  for (const [k, v] of Object.entries(payload)) {
+    if (!v) { errEl.textContent = `Campo obbligatorio: ${k}.`; errEl.style.display = 'block'; return; }
+  }
+
+  /* Verifica lunghezza minima password */
+  const hintEl = document.getElementById('reg-password-hint');
+  if (payload.password.length < 8) {
+    hintEl.style.display = 'block';
+    errEl.textContent    = 'La password deve essere di almeno 8 caratteri.';
+    errEl.style.display  = 'block';
+    return;
+  }
+  hintEl.style.display = 'none';
+
+  const btn = evt.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+
+  const { ok, data } = await apiFetch('/api/registrazione', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  btn.disabled = false;
+
+  if (ok) {
+    showToast('Account creato. Puoi ora accedere.');
+    document.getElementById('form-reg').reset();
+    document.getElementById('login-username').value = payload.username;
+    document.getElementById('login-password').value = payload.password;
+  } else {
+    errEl.textContent = data.errore || 'Errore nella registrazione.';
+    errEl.style.display = 'block';
+  }
+}
+</script>
+{% endblock %}
