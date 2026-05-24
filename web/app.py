@@ -12,6 +12,7 @@ Avvio rapido con Docker:
 """
 
 import os
+import sys
 import json
 import shutil
 import sqlite3
@@ -34,6 +35,11 @@ app.secret_key = os.environ.get('SECRET_KEY', 'chiave-segreta-sviluppo-aeroporto
 BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH     = os.path.join(BASE_DIR, 'data', 'aeroporto.db')
 SCHEMA_PATH = os.path.join(BASE_DIR, 'schema.sql')
+
+# Aggiunge la radice del progetto al path per importare db.query_loader
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+from db.query_loader import Q
 
 
 # =============================================================================
@@ -91,9 +97,7 @@ def _genera_pnr_unico(conn):
     """Genera un PNR alfanumerico di 6 caratteri non ancora presente nel DB."""
     while True:
         pnr = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        if not conn.execute(
-            "SELECT id FROM prenotazioni WHERE codice_prenotazione = ?", (pnr,)
-        ).fetchone():
+        if not conn.execute(Q.get('pren_pnr_check'), {'pnr': pnr}).fetchone():
             return pnr
 
 
@@ -101,10 +105,7 @@ def _genera_posto(conn, volo_id, posti_totali):
     """Restituisce il primo posto libero sul volo (es. '1A', '1B', ...)."""
     posti_occupati = {
         r[0] for r in conn.execute(
-            """SELECT ci.numero_posto FROM carte_imbarco ci
-               JOIN prenotazioni p ON ci.prenotazione_id = p.id
-               WHERE p.volo_id = ? AND ci.numero_posto IS NOT NULL""",
-            (volo_id,)
+            Q.get('posti_occupati_carta'), {'volo_id': volo_id}
         ).fetchall()
     }
     for riga in range(1, posti_totali + 1):
@@ -123,12 +124,12 @@ def registra_log(azione, utente_id=None, dettagli=None):
     """Inserisce un evento nel log di sistema. Non interrompe mai l'operazione principale."""
     try:
         db_execute(
-            "INSERT INTO log (utente_id, azione, dettagli) VALUES (?, ?, ?)",
-            (
-                utente_id,
-                azione,
-                json.dumps(dettagli, ensure_ascii=False) if dettagli else None
-            )
+            Q.get('log_insert'),
+            {
+                'uid':      utente_id,
+                'azione':   azione,
+                'dettagli': json.dumps(dettagli, ensure_ascii=False) if dettagli else None,
+            }
         )
     except Exception:
         pass
@@ -658,7 +659,7 @@ def login():
     if not username or not password:
         return jsonify({"errore": "username e password obbligatori"}), 400
 
-    utente = query_row("SELECT * FROM utenti WHERE username = ?", (username,))
+    utente = query_row(Q.get('utente_by_username'), {'username': username})
 
     if not utente or not check_password_hash(utente['password_hash'], password):
         registra_log('login_failed', None, {'tentativo_username': username})
@@ -705,24 +706,23 @@ def registrazione():
     if len(dati['password']) < 8:
         return jsonify({"errore": "La password deve essere di almeno 8 caratteri"}), 400
 
-    if query_row("SELECT id FROM passeggeri WHERE documento = ?", (dati['documento'],)):
+    if query_row(Q.get('passeggero_by_doc'), {'documento': dati['documento']}):
         return jsonify({"errore": "Documento già registrato"}), 409
-    if query_row("SELECT id FROM utenti WHERE username = ?", (dati['username'],)):
+    if query_row(Q.get('utente_by_username_check'), {'username': dati['username']}):
         return jsonify({"errore": "Username già in uso"}), 409
 
     conn = get_db()
     try:
         conn.execute("BEGIN")
         cur_pass = conn.execute(
-            "INSERT INTO passeggeri (nome, cognome, documento) VALUES (?, ?, ?)",
-            (dati['nome'].strip(), dati['cognome'].strip(), dati['documento'].strip())
+            Q.get('insert_passeggero'),
+            {'nome': dati['nome'].strip(), 'cognome': dati['cognome'].strip(), 'documento': dati['documento'].strip()}
         )
         passeggero_id = cur_pass.lastrowid
 
         cur_utente = conn.execute(
-            """INSERT INTO utenti (username, password_hash, ruolo, passeggero_id)
-               VALUES (?, ?, 'passeggero', ?)""",
-            (dati['username'].strip(), generate_password_hash(dati['password']), passeggero_id)
+            Q.get('insert_utente_passeggero'),
+            {'username': dati['username'].strip(), 'password_hash': generate_password_hash(dati['password']), 'passeggero_id': passeggero_id}
         )
         utente_id = cur_utente.lastrowid
         conn.commit()
@@ -747,29 +747,13 @@ def registrazione():
 
 @app.route('/api/aeroporti')
 def lista_aeroporti():
-    return jsonify(query_rows("SELECT id, codice, nome, lat, lon FROM aeroporti ORDER BY codice"))
+    return jsonify(query_rows(Q.get('lista_aeroporti')))
 
 
 @app.route('/api/voli/attivi')
 def voli_attivi():
     """GET /api/voli/attivi — voli programmato/partito con coordinate per la mappa."""
-    voli = query_rows(
-        """SELECT v.id, v.codice_volo, c.nome AS compagnia,
-                  v.origine, v.destinazione, v.data_ora_partenza, v.data_ora_arrivo,
-                  v.posti_totali, v.stato, v.prezzo_base,
-                  v.posti_totali - COALESCE((
-                      SELECT COUNT(*) FROM prenotazioni p
-                      WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata')
-                  ), 0) AS posti_liberi,
-                  ao.lat AS orig_lat, ao.lon AS orig_lon, ao.nome AS orig_nome,
-                  ad.lat AS dest_lat, ad.lon AS dest_lon, ad.nome AS dest_nome
-           FROM   voli v
-           JOIN   compagnie_aeree c ON v.compagnia_id = c.id
-           LEFT JOIN aeroporti ao   ON v.origine      = ao.codice
-           LEFT JOIN aeroporti ad   ON v.destinazione = ad.codice
-           WHERE  v.stato IN ('programmato', 'partito')
-           ORDER BY v.data_ora_partenza"""
-    )
+    voli = query_rows(Q.get('voli_attivi'))
     return jsonify(voli)
 
 
@@ -780,37 +764,8 @@ def cerca_voli():
     destinazione = request.args.get('destinazione', '').strip().upper()
     data         = request.args.get('data', '').strip()
 
-    sql = """
-        SELECT v.id, v.codice_volo, c.nome AS compagnia, g.codice AS gate,
-               v.origine, v.destinazione, v.data_ora_partenza, v.data_ora_arrivo,
-               v.posti_totali, v.stato, v.prezzo_base,
-               v.posti_totali - COALESCE((
-                   SELECT COUNT(*) FROM prenotazioni p
-                   WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata')
-               ), 0) AS posti_liberi,
-               ao.lat AS orig_lat, ao.lon AS orig_lon, ao.nome AS orig_nome,
-               ad.lat AS dest_lat, ad.lon AS dest_lon, ad.nome AS dest_nome
-        FROM   voli v
-        JOIN   compagnie_aeree c ON v.compagnia_id = c.id
-        LEFT JOIN gate g         ON v.gate_id = g.id
-        LEFT JOIN aeroporti ao   ON v.origine      = ao.codice
-        LEFT JOIN aeroporti ad   ON v.destinazione = ad.codice
-        WHERE  1=1
-    """
-    params = []
-    if origine:
-        sql += " AND v.origine = ?"
-        params.append(origine)
-    if destinazione:
-        sql += " AND v.destinazione = ?"
-        params.append(destinazione)
-    if data:
-        sql += " AND DATE(v.data_ora_partenza) = ?"
-        params.append(data)
-    # Escludi i voli con data/ora di partenza già passata (non prenotabili)
-    sql += " AND v.data_ora_partenza > datetime('now', 'localtime')"
-    sql += " ORDER BY v.data_ora_partenza"
-    return jsonify(query_rows(sql, params))
+    sql = Q.render('cerca_voli', origine=origine, destinazione=destinazione, data=data)
+    return jsonify(query_rows(sql, {'origine': origine, 'destinazione': destinazione, 'data': data}))
 
 
 @app.route('/api/voli/<int:volo_id>/posti')
@@ -820,7 +775,7 @@ def volo_posti(volo_id):
     GET /api/voli/<id>/posti
     Mappa dei posti liberi e occupati per il componente seat map.
     """
-    volo = query_row("SELECT id, posti_totali FROM voli WHERE id = ?", (volo_id,))
+    volo = query_row(Q.get('volo_by_id'), {'id': volo_id})
     if not volo:
         return jsonify({"errore": "Volo non trovato"}), 404
 
@@ -833,12 +788,7 @@ def volo_posti(volo_id):
     tutti = tutti[:posti_totali]
 
     # Posti già assegnati nelle carte d'imbarco
-    occupati_rows = query_rows(
-        """SELECT ci.numero_posto FROM carte_imbarco ci
-           JOIN prenotazioni p ON ci.prenotazione_id = p.id
-           WHERE p.volo_id = ? AND ci.numero_posto IS NOT NULL""",
-        (volo_id,)
-    )
+    occupati_rows = query_rows(Q.get('posti_occupati_carta'), {'volo_id': volo_id})
     posti_occupati = [r['numero_posto'] for r in occupati_rows if r['numero_posto']]
     posti_liberi   = [p for p in tutti if p not in posti_occupati]
 
@@ -875,7 +825,7 @@ def prenota():
     try:
         conn.execute("BEGIN")
 
-        volo = conn.execute("SELECT * FROM voli WHERE id = ?", (volo_id,)).fetchone()
+        volo = conn.execute(Q.get('volo_by_id'), {'id': volo_id}).fetchone()
         if not volo:
             conn.rollback()
             return jsonify({"errore": "Volo non trovato"}), 404
@@ -884,16 +834,14 @@ def prenota():
             return jsonify({"errore": f"Il volo è in stato '{volo['stato']}': non accetta prenotazioni"}), 400
 
         posti_occupati = conn.execute(
-            "SELECT COUNT(*) FROM prenotazioni WHERE volo_id = ? AND stato IN ('prenotata', 'pagata')",
-            (volo_id,)
+            Q.get('posti_occupati_count'), {'volo_id': volo_id}
         ).fetchone()[0]
         if posti_occupati >= volo['posti_totali']:
             conn.rollback()
             return jsonify({"errore": "Volo completo"}), 400
 
         esistente = conn.execute(
-            "SELECT id FROM prenotazioni WHERE passeggero_id = ? AND volo_id = ? AND stato != 'cancellata'",
-            (passeggero_id, volo_id)
+            Q.get('pren_esistente'), {'passeggero_id': passeggero_id, 'volo_id': volo_id}
         ).fetchone()
         if esistente:
             conn.rollback()
@@ -903,8 +851,8 @@ def prenota():
         prezzo = float(volo['prezzo_base']) if volo['prezzo_base'] else 100.0
         pnr    = _genera_pnr_unico(conn)
         cur    = conn.execute(
-            "INSERT INTO prenotazioni (passeggero_id, volo_id, codice_prenotazione, prezzo, stato) VALUES (?, ?, ?, ?, 'prenotata')",
-            (passeggero_id, volo_id, pnr, prezzo)
+            Q.get('insert_prenotazione'),
+            {'passeggero_id': passeggero_id, 'volo_id': volo_id, 'pnr': pnr, 'prezzo': prezzo}
         )
         prenotazione_id = cur.lastrowid
         conn.commit()
@@ -931,22 +879,7 @@ def prenota():
 def mie_prenotazioni():
     """GET /api/mie_prenotazioni — prenotazioni del passeggero loggato con carta d'imbarco."""
     passeggero_id = session['passeggero_id']
-    prenotazioni = query_rows(
-        """SELECT p.id, p.codice_prenotazione, p.data_prenotazione, p.prezzo,
-                  p.stato, p.valutazione,
-                  v.id AS volo_id, v.codice_volo, v.origine, v.destinazione,
-                  v.data_ora_partenza, v.data_ora_arrivo, v.stato AS stato_volo,
-                  v.orario_stimato, c.nome AS compagnia,
-                  ci.numero_posto, ci.gate_imbarco_id,
-                  ci.data_emissione AS data_carta_imbarco
-           FROM   prenotazioni p
-           JOIN   voli v            ON p.volo_id = v.id
-           JOIN   compagnie_aeree c ON v.compagnia_id = c.id
-           LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-           WHERE  p.passeggero_id = ?
-           ORDER BY v.data_ora_partenza""",
-        (passeggero_id,)
-    )
+    prenotazioni = query_rows(Q.get('mie_prenotazioni'), {'passeggero_id': passeggero_id})
     return jsonify(prenotazioni)
 
 
@@ -960,15 +893,14 @@ def paga(prenotazione_id):
     passeggero_id = session['passeggero_id']
 
     pren = query_row(
-        "SELECT * FROM prenotazioni WHERE id = ? AND passeggero_id = ?",
-        (prenotazione_id, passeggero_id)
+        Q.get('pren_by_id_passeggero'), {'id': prenotazione_id, 'passeggero_id': passeggero_id}
     )
     if not pren:
         return jsonify({"errore": "Prenotazione non trovata"}), 404
     if pren['stato'] != 'prenotata':
         return jsonify({"errore": f"La prenotazione è in stato '{pren['stato']}' e non può essere pagata"}), 400
 
-    passeggero = query_row("SELECT crediti FROM passeggeri WHERE id = ?", (passeggero_id,))
+    passeggero = query_row(Q.get('crediti_passeggero'), {'id': passeggero_id})
     crediti    = float(passeggero['crediti']) if passeggero else 0.0
     prezzo     = float(pren['prezzo'])
 
@@ -982,8 +914,8 @@ def paga(prenotazione_id):
     conn = get_db()
     try:
         conn.execute("BEGIN")
-        conn.execute("UPDATE prenotazioni SET stato = 'pagata' WHERE id = ?", (prenotazione_id,))
-        conn.execute("UPDATE passeggeri SET crediti = crediti - ? WHERE id = ?", (prezzo, passeggero_id))
+        conn.execute(Q.get('update_pren_pagata'), {'id': prenotazione_id})
+        conn.execute(Q.get('update_crediti_scala'), {'importo': prezzo, 'id': passeggero_id})
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -994,15 +926,10 @@ def paga(prenotazione_id):
     registra_log('pagamento', session['utente_id'],
                  {'prenotazione_id': prenotazione_id, 'importo': prezzo})
 
-    nuovi = query_row("SELECT crediti FROM passeggeri WHERE id = ?", (passeggero_id,))
+    nuovi = query_row(Q.get('crediti_passeggero'), {'id': passeggero_id})
 
     # Recupera info volo per la ricevuta
-    volo_info = query_row(
-        """SELECT v.codice_volo, v.origine, v.destinazione, v.data_ora_partenza, c.nome AS compagnia
-           FROM voli v JOIN compagnie_aeree c ON v.compagnia_id = c.id
-           WHERE v.id = ?""",
-        (pren['volo_id'],)
-    )
+    volo_info = query_row(Q.get('volo_info_ricevuta'), {'volo_id': pren['volo_id']})
     # ID transazione basato su prenotazione_id + timestamp ridotto
     ts_short = int(datetime.now().timestamp()) % 1000000
     transazione_id = f"TXN{prenotazione_id:06d}{ts_short:06d}"
@@ -1038,18 +965,17 @@ def checkin_online(prenotazione_id):
     numero_posto_richiesto = (dati.get('numero_posto') or '').strip() or None
 
     pren = query_row(
-        "SELECT * FROM prenotazioni WHERE id = ? AND passeggero_id = ?",
-        (prenotazione_id, passeggero_id)
+        Q.get('pren_by_id_passeggero'), {'id': prenotazione_id, 'passeggero_id': passeggero_id}
     )
     if not pren:
         return jsonify({"errore": "Prenotazione non trovata"}), 404
     if pren['stato'] != 'pagata':
         return jsonify({"errore": "Il check-in online richiede una prenotazione in stato 'pagata'"}), 400
 
-    if query_row("SELECT id FROM carte_imbarco WHERE prenotazione_id = ?", (prenotazione_id,)):
+    if query_row(Q.get('carta_by_pren'), {'pren_id': prenotazione_id}):
         return jsonify({"errore": "Carta d'imbarco già emessa per questa prenotazione"}), 409
 
-    volo = query_row("SELECT * FROM voli WHERE id = ?", (pren['volo_id'],))
+    volo = query_row(Q.get('volo_by_id'), {'id': pren['volo_id']})
 
     conn = get_db()
     try:
@@ -1058,10 +984,7 @@ def checkin_online(prenotazione_id):
         if numero_posto_richiesto:
             # Verifica che il posto richiesto sia libero
             occupati = {r[0] for r in conn.execute(
-                """SELECT ci.numero_posto FROM carte_imbarco ci
-                   JOIN prenotazioni p ON ci.prenotazione_id = p.id
-                   WHERE p.volo_id = ? AND ci.numero_posto IS NOT NULL""",
-                (volo['id'],)
+                Q.get('posti_occupati_carta'), {'volo_id': volo['id']}
             ).fetchall()}
             if numero_posto_richiesto in occupati:
                 conn.rollback()
@@ -1071,11 +994,11 @@ def checkin_online(prenotazione_id):
             posto = _genera_posto(conn, volo['id'], volo['posti_totali'])
 
         cur = conn.execute(
-            "INSERT INTO carte_imbarco (prenotazione_id, numero_posto, gate_imbarco_id, operatore_id) VALUES (?, ?, ?, NULL)",
-            (prenotazione_id, posto, volo['gate_id'])
+            Q.get('insert_carta_imbarco_online'),
+            {'pren_id': prenotazione_id, 'numero_posto': posto, 'gate_id': volo['gate_id']}
         )
         carta_id = cur.lastrowid
-        conn.execute("UPDATE prenotazioni SET stato = 'imbarcato' WHERE id = ?", (prenotazione_id,))
+        conn.execute(Q.get('update_pren_imbarcato'), {'id': prenotazione_id})
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1104,8 +1027,7 @@ def cancella_prenotazione(prenotazione_id):
     passeggero_id = session['passeggero_id']
 
     pren = query_row(
-        "SELECT * FROM prenotazioni WHERE id = ? AND passeggero_id = ?",
-        (prenotazione_id, passeggero_id)
+        Q.get('pren_by_id_passeggero'), {'id': prenotazione_id, 'passeggero_id': passeggero_id}
     )
     if not pren:
         return jsonify({"errore": "Prenotazione non trovata"}), 404
@@ -1121,8 +1043,8 @@ def cancella_prenotazione(prenotazione_id):
     conn = get_db()
     try:
         conn.execute("BEGIN")
-        conn.execute("UPDATE prenotazioni SET stato = 'cancellata' WHERE id = ?", (prenotazione_id,))
-        conn.execute("UPDATE passeggeri SET crediti = crediti - ? WHERE id = ?", (penale, passeggero_id))
+        conn.execute(Q.get('update_pren_cancellata'), {'id': prenotazione_id})
+        conn.execute(Q.get('update_crediti_scala'), {'importo': penale, 'id': passeggero_id})
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1145,19 +1067,7 @@ def cancella_prenotazione(prenotazione_id):
 def passeggero_storico():
     """GET /api/passeggero/storico — viaggi completati (imbarcato + volo arrivato)."""
     passeggero_id = session['passeggero_id']
-    viaggi = query_rows(
-        """SELECT p.id AS prenotazione_id, p.codice_prenotazione, p.prezzo, p.valutazione,
-                  v.codice_volo, c.nome AS compagnia, v.origine, v.destinazione,
-                  v.data_ora_partenza, v.data_ora_arrivo,
-                  ci.numero_posto
-           FROM   prenotazioni p
-           JOIN   voli v            ON p.volo_id = v.id
-           JOIN   compagnie_aeree c ON v.compagnia_id = c.id
-           LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-           WHERE  p.passeggero_id = ? AND p.stato = 'imbarcato' AND v.stato = 'arrivato'
-           ORDER BY v.data_ora_partenza DESC""",
-        (passeggero_id,)
-    )
+    viaggi = query_rows(Q.get('passeggero_storico'), {'passeggero_id': passeggero_id})
     return jsonify(viaggi)
 
 
@@ -1173,10 +1083,7 @@ def passeggero_valuta(prenotazione_id):
 
     passeggero_id = session['passeggero_id']
     pren = query_row(
-        """SELECT p.*, v.stato AS stato_volo FROM prenotazioni p
-           JOIN voli v ON p.volo_id = v.id
-           WHERE p.id = ? AND p.passeggero_id = ?""",
-        (prenotazione_id, passeggero_id)
+        Q.get('pren_valuta'), {'id': prenotazione_id, 'passeggero_id': passeggero_id}
     )
     if not pren:
         return jsonify({"errore": "Prenotazione non trovata"}), 404
@@ -1185,7 +1092,7 @@ def passeggero_valuta(prenotazione_id):
     if pren['valutazione'] is not None:
         return jsonify({"errore": "Hai già valutato questo volo"}), 400
 
-    db_execute("UPDATE prenotazioni SET valutazione = ? WHERE id = ?", (valutazione, prenotazione_id))
+    db_execute(Q.get('update_valutazione'), {'valutazione': valutazione, 'id': prenotazione_id})
     registra_log('valutazione', session['utente_id'],
                  {'prenotazione_id': prenotazione_id, 'valutazione': valutazione})
 
@@ -1196,7 +1103,7 @@ def passeggero_valuta(prenotazione_id):
 @ruolo_richiesto('passeggero')
 def passeggero_crediti():
     """GET /api/passeggero/crediti — saldo del portafoglio virtuale."""
-    p = query_row("SELECT crediti FROM passeggeri WHERE id = ?", (session['passeggero_id'],))
+    p = query_row(Q.get('crediti_passeggero'), {'id': session['passeggero_id']})
     return jsonify({"crediti": float(p['crediti']) if p else 0.0})
 
 
@@ -1212,11 +1119,8 @@ def passeggero_ricarica():
     except (ValueError, TypeError):
         return jsonify({"errore": "Importo deve essere un numero positivo"}), 400
 
-    db_execute(
-        "UPDATE passeggeri SET crediti = crediti + ? WHERE id = ?",
-        (importo, session['passeggero_id'])
-    )
-    p = query_row("SELECT crediti FROM passeggeri WHERE id = ?", (session['passeggero_id'],))
+    db_execute(Q.get('update_crediti_aggiungi'), {'importo': importo, 'id': session['passeggero_id']})
+    p = query_row(Q.get('crediti_passeggero'), {'id': session['passeggero_id']})
     registra_log('ricarica_crediti', session['utente_id'], {'importo': importo})
 
     return jsonify({"status": "ok", "crediti": float(p['crediti'])})
@@ -1226,11 +1130,8 @@ def passeggero_ricarica():
 @ruolo_richiesto('passeggero')
 def leggi_profilo():
     """GET /api/passeggero/profilo — dati anagrafici e credenziali (no password)."""
-    passeggero = query_row(
-        "SELECT nome, cognome, documento, crediti FROM passeggeri WHERE id = ?",
-        (session['passeggero_id'],)
-    )
-    utente = query_row("SELECT username FROM utenti WHERE id = ?", (session['utente_id'],))
+    passeggero = query_row(Q.get('profilo_passeggero'), {'id': session['passeggero_id']})
+    utente = query_row(Q.get('utente_username'), {'id': session['utente_id']})
     if not passeggero or not utente:
         return jsonify({"errore": "Profilo non trovato"}), 404
 
@@ -1255,8 +1156,8 @@ def modifica_profilo():
     utente_id     = session['utente_id']
     dati          = request.get_json(silent=True) or {}
 
-    passeggero = query_row("SELECT * FROM passeggeri WHERE id = ?", (passeggero_id,))
-    utente     = query_row("SELECT * FROM utenti WHERE id = ?", (utente_id,))
+    passeggero = query_row(Q.get('passeggero_full'), {'id': passeggero_id})
+    utente     = query_row(Q.get('utente_full'), {'id': utente_id})
     if not passeggero or not utente:
         return jsonify({"errore": "Profilo non trovato"}), 404
 
@@ -1269,22 +1170,20 @@ def modifica_profilo():
         return jsonify({"errore": "Nome, cognome e documento non possono essere vuoti"}), 400
 
     if documento != passeggero['documento']:
-        if query_row("SELECT id FROM passeggeri WHERE documento = ? AND id != ?",
-                     (documento, passeggero_id)):
+        if query_row(Q.get('doc_altro_passeggero'), {'documento': documento, 'id': passeggero_id}):
             return jsonify({"errore": "Documento già in uso da un altro passeggero"}), 409
 
     db_execute(
-        "UPDATE passeggeri SET nome = ?, cognome = ?, documento = ? WHERE id = ?",
-        (nome, cognome, documento, passeggero_id)
+        Q.get('update_passeggero_anagrafica'),
+        {'nome': nome, 'cognome': cognome, 'documento': documento, 'id': passeggero_id}
     )
 
     # ── Username ─────────────────────────────────────────────────────────────
     nuovo_username = (dati.get('username') or '').strip()
     if nuovo_username and nuovo_username != utente['username']:
-        if query_row("SELECT id FROM utenti WHERE username = ? AND id != ?",
-                     (nuovo_username, utente_id)):
+        if query_row(Q.get('username_altro_utente'), {'username': nuovo_username, 'id': utente_id}):
             return jsonify({"errore": "Username già in uso da un altro utente"}), 409
-        db_execute("UPDATE utenti SET username = ? WHERE id = ?", (nuovo_username, utente_id))
+        db_execute(Q.get('update_username'), {'username': nuovo_username, 'id': utente_id})
         session['username'] = nuovo_username
 
     # ── Password ─────────────────────────────────────────────────────────────
@@ -1301,8 +1200,7 @@ def modifica_profilo():
             return jsonify({"errore": "La nuova password e la conferma non coincidono"}), 400
         if len(nuova_password) < 8:
             return jsonify({"errore": "La password deve essere di almeno 8 caratteri"}), 400
-        db_execute("UPDATE utenti SET password_hash = ? WHERE id = ?",
-                   (generate_password_hash(nuova_password), utente_id))
+        db_execute(Q.get('update_password'), {'password_hash': generate_password_hash(nuova_password), 'id': utente_id})
 
     registra_log('modifica_profilo', utente_id)
 
@@ -1324,22 +1222,7 @@ def modifica_profilo():
 def compagnia_lista_voli():
     """GET /api/compagnia/voli — voli della compagnia con posti liberi e warning gate."""
     compagnia_id = session['compagnia_id']
-    voli = query_rows(
-        """SELECT v.id, v.codice_volo, v.origine, v.destinazione,
-                  v.data_ora_partenza, v.data_ora_arrivo,
-                  v.posti_totali, v.stato, v.prezzo_base,
-                  v.orario_stimato, v.ritardo_note,
-                  v.gate_id, g.codice AS gate,
-                  v.posti_totali - COALESCE((
-                      SELECT COUNT(*) FROM prenotazioni p
-                      WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata')
-                  ), 0) AS posti_liberi
-           FROM   voli v
-           LEFT JOIN gate g ON v.gate_id = g.id
-           WHERE  v.compagnia_id = ?
-           ORDER BY v.data_ora_partenza""",
-        (compagnia_id,)
-    )
+    voli = query_rows(Q.get('compagnia_lista_voli'), {'compagnia_id': compagnia_id})
     voli = _calcola_warning_gate(voli)
     return jsonify(voli)
 
@@ -1389,21 +1272,18 @@ def compagnia_crea_volo():
     compagnia_id = session['compagnia_id']
     try:
         volo_id = db_execute(
-            """INSERT INTO voli
-               (codice_volo, compagnia_id, gate_id, origine, destinazione,
-                data_ora_partenza, data_ora_arrivo, posti_totali, stato, prezzo_base)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'programmato', ?)""",
-            (
-                dati['codice_volo'].strip().upper(),
-                compagnia_id,
-                dati.get('gate_id'),
-                dati['origine'].strip().upper(),
-                dati['destinazione'].strip().upper(),
-                dati['data_ora_partenza'].strip(),
-                dati['data_ora_arrivo'].strip(),
-                posti,
-                prezzo_base,
-            )
+            Q.get('insert_volo'),
+            {
+                'codice_volo':      dati['codice_volo'].strip().upper(),
+                'compagnia_id':     compagnia_id,
+                'gate_id':          dati.get('gate_id'),
+                'origine':          dati['origine'].strip().upper(),
+                'destinazione':     dati['destinazione'].strip().upper(),
+                'data_ora_partenza': dati['data_ora_partenza'].strip(),
+                'data_ora_arrivo':  dati['data_ora_arrivo'].strip(),
+                'posti_totali':     posti,
+                'prezzo_base':      prezzo_base,
+            }
         )
         registra_log('creazione_volo', session['utente_id'],
                      {'volo_id': volo_id, 'codice_volo': dati['codice_volo'].strip().upper()})
@@ -1418,20 +1298,17 @@ def compagnia_crea_volo():
 def compagnia_elimina_volo(id):
     """DELETE /api/compagnia/voli/<id> — solo voli programmato senza prenotazioni attive."""
     compagnia_id = session['compagnia_id']
-    volo = query_row("SELECT * FROM voli WHERE id = ? AND compagnia_id = ?", (id, compagnia_id))
+    volo = query_row(Q.get('volo_compagnia'), {'id': id, 'compagnia_id': compagnia_id})
     if not volo:
         return jsonify({"errore": "Volo non trovato o non appartenente alla tua compagnia"}), 404
     if volo['stato'] != 'programmato':
         return jsonify({"errore": f"Il volo è in stato '{volo['stato']}': solo i voli programmato sono eliminabili"}), 400
 
-    attive = query_row(
-        "SELECT COUNT(*) AS n FROM prenotazioni WHERE volo_id = ? AND stato IN ('prenotata', 'pagata')",
-        (id,)
-    )
+    attive = query_row(Q.get('pren_attive_volo'), {'volo_id': id})
     if attive['n'] > 0:
         return jsonify({"errore": f"Il volo ha {attive['n']} prenotazione/i attiva/e. Impossibile eliminarlo."}), 409
 
-    db_execute("DELETE FROM voli WHERE id = ?", (id,))
+    db_execute(Q.get('delete_volo'), {'id': id})
     registra_log('eliminazione_volo', session['utente_id'],
                  {'volo_id': id, 'codice_volo': volo['codice_volo']})
     return jsonify({"messaggio": f"Volo {volo['codice_volo']} eliminato"})
@@ -1446,7 +1323,7 @@ def compagnia_modifica_volo(id):
                  stato?, prezzo_base?, orario_stimato?, ritardo_note? }
     """
     compagnia_id = session['compagnia_id']
-    volo = query_row("SELECT * FROM voli WHERE id = ? AND compagnia_id = ?", (id, compagnia_id))
+    volo = query_row(Q.get('volo_compagnia'), {'id': id, 'compagnia_id': compagnia_id})
     if not volo:
         return jsonify({"errore": "Volo non trovato o non appartenente alla tua compagnia"}), 404
 
@@ -1497,27 +1374,18 @@ def compagnia_modifica_volo(id):
         ritardo_note   = None
 
     db_execute(
-        """UPDATE voli
-           SET gate_id           = ?,
-               data_ora_partenza = ?,
-               data_ora_arrivo   = ?,
-               posti_totali      = ?,
-               stato             = ?,
-               prezzo_base       = ?,
-               orario_stimato    = ?,
-               ritardo_note      = ?
-           WHERE id = ?""",
-        (
-            dati.get('gate_id', volo['gate_id']),
-            dati.get('data_ora_partenza', volo['data_ora_partenza']),
-            dati.get('data_ora_arrivo',   volo['data_ora_arrivo']),
-            nuovi_posti,
-            nuovo_stato,
-            nuovo_prezzo,
-            orario_stimato,
-            ritardo_note,
-            id,
-        )
+        Q.get('update_volo'),
+        {
+            'gate_id':           dati.get('gate_id', volo['gate_id']),
+            'data_ora_partenza': dati.get('data_ora_partenza', volo['data_ora_partenza']),
+            'data_ora_arrivo':   dati.get('data_ora_arrivo',   volo['data_ora_arrivo']),
+            'posti_totali':      nuovi_posti,
+            'stato':             nuovo_stato,
+            'prezzo_base':       nuovo_prezzo,
+            'orario_stimato':    orario_stimato,
+            'ritardo_note':      ritardo_note,
+            'id':                id,
+        }
     )
     registra_log('modifica_volo', session['utente_id'],
                  {'volo_id': id, 'codice_volo': volo['codice_volo'], 'nuovo_stato': nuovo_stato})
@@ -1531,22 +1399,10 @@ def compagnia_passeggeri_volo(id):
     compagnia_id = session['compagnia_id']
 
     # Verifica appartenenza del volo alla compagnia loggata
-    if not query_row("SELECT id FROM voli WHERE id = ? AND compagnia_id = ?", (id, compagnia_id)):
+    if not query_row(Q.get('volo_compagnia'), {'id': id, 'compagnia_id': compagnia_id}):
         return jsonify({"errore": "Volo non trovato o non appartenente alla tua compagnia"}), 404
 
-    passeggeri = query_rows(
-        """SELECT p.id AS prenotazione_id, pass.id AS passeggero_id,
-                  pass.nome, pass.cognome, pass.documento,
-                  p.stato AS stato_prenotazione,
-                  p.codice_prenotazione,
-                  ci.numero_posto
-           FROM   prenotazioni p
-           JOIN   passeggeri pass ON p.passeggero_id = pass.id
-           LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-           WHERE  p.volo_id = ?
-           ORDER BY pass.cognome, pass.nome""",
-        (id,)
-    )
+    passeggeri = query_rows(Q.get('compagnia_passeggeri_volo'), {'volo_id': id})
     return jsonify(passeggeri)
 
 
@@ -1558,14 +1414,7 @@ def compagnia_passeggeri_volo(id):
 @ruolo_richiesto('operatore')
 def operatore_gate():
     """GET /api/operatore/gate — stato di tutti i gate con voli assegnati."""
-    gate = query_rows(
-        """SELECT g.id, g.codice, g.stato,
-                  GROUP_CONCAT(v.codice_volo, ', ') AS voli_assegnati
-           FROM   gate g
-           LEFT JOIN voli v ON v.gate_id = g.id AND v.stato != 'arrivato'
-           GROUP BY g.id
-           ORDER BY g.codice"""
-    )
+    gate = query_rows(Q.get('gate_list'))
     return jsonify(gate)
 
 
@@ -1579,11 +1428,11 @@ def operatore_modifica_gate(id):
     if nuovo_stato not in ('libero', 'occupato', 'manutenzione'):
         return jsonify({"errore": "stato non valido. Valori ammessi: libero, occupato, manutenzione"}), 400
 
-    gate = query_row("SELECT * FROM gate WHERE id = ?", (id,))
+    gate = query_row(Q.get('gate_by_id'), {'id': id})
     if not gate:
         return jsonify({"errore": "Gate non trovato"}), 404
 
-    db_execute("UPDATE gate SET stato = ? WHERE id = ?", (nuovo_stato, id))
+    db_execute(Q.get('update_gate'), {'stato': nuovo_stato, 'id': id})
     registra_log('cambio_stato_gate', session['utente_id'],
                  {'gate_id': id, 'stato_precedente': gate['stato'], 'nuovo_stato': nuovo_stato})
     return jsonify({"messaggio": f"Gate aggiornato a '{nuovo_stato}'"})
@@ -1595,23 +1444,7 @@ def operatore_voli_oggi():
     """GET /api/operatore/voli?data=YYYY-MM-DD — cruscotto voli per data (default: oggi)."""
     data = request.args.get('data', datetime.now().strftime('%Y-%m-%d')).strip()
 
-    voli = query_rows(
-        """SELECT v.id, v.codice_volo, c.nome AS compagnia_nome,
-                  v.origine, v.destinazione, v.data_ora_partenza, v.data_ora_arrivo,
-                  v.orario_stimato, v.stato AS stato_volo,
-                  g.codice AS gate_codice, g.stato AS gate_stato,
-                  v.posti_totali,
-                  COALESCE((
-                      SELECT COUNT(*) FROM prenotazioni p
-                      WHERE p.volo_id = v.id AND p.stato IN ('pagata', 'imbarcato')
-                  ), 0) AS posti_occupati
-           FROM   voli v
-           JOIN   compagnie_aeree c ON v.compagnia_id = c.id
-           LEFT JOIN gate g         ON v.gate_id = g.id
-           WHERE  DATE(v.data_ora_partenza) = ?
-           ORDER BY v.data_ora_partenza""",
-        (data,)
-    )
+    voli = query_rows(Q.get('operatore_voli_oggi'), {'data': data})
     for v in voli:
         if v['posti_totali'] > 0:
             v['percentuale_occupazione'] = round(v['posti_occupati'] / v['posti_totali'] * 100, 1)
@@ -1639,17 +1472,7 @@ def operatore_checkin():
     # ── Ricerca per PNR ──────────────────────────────────────────────────────
     if codice_prenotazione:
         pren = query_row(
-            """SELECT p.id, p.codice_prenotazione, p.volo_id,
-                      v.codice_volo, v.origine, v.destinazione, v.data_ora_partenza,
-                      v.posti_totali, v.gate_id,
-                      pass.nome AS passeggero_nome, pass.cognome AS passeggero_cognome,
-                      pass.documento
-               FROM   prenotazioni p
-               JOIN   voli v       ON p.volo_id = v.id
-               JOIN   passeggeri pass ON p.passeggero_id = pass.id
-               LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-               WHERE  p.codice_prenotazione = ? AND p.stato = 'pagata' AND ci.id IS NULL""",
-            (codice_prenotazione.upper(),)
+            Q.get('checkin_by_pnr'), {'pnr': codice_prenotazione.upper()}
         )
         if not pren:
             return jsonify({"errore": "Prenotazione non trovata o non in stato 'pagata'"}), 404
@@ -1658,19 +1481,7 @@ def operatore_checkin():
     # ── Ricerca per nome + cognome ───────────────────────────────────────────
     if nome and cognome:
         risultati = query_rows(
-            """SELECT p.id, p.codice_prenotazione, p.volo_id,
-                      v.codice_volo, v.origine, v.destinazione, v.data_ora_partenza,
-                      v.posti_totali, v.gate_id,
-                      pass.nome AS passeggero_nome, pass.cognome AS passeggero_cognome,
-                      pass.documento
-               FROM   prenotazioni p
-               JOIN   voli v       ON p.volo_id = v.id
-               JOIN   passeggeri pass ON p.passeggero_id = pass.id
-               LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-               WHERE  LOWER(pass.nome) = LOWER(?) AND LOWER(pass.cognome) = LOWER(?)
-                 AND  p.stato = 'pagata' AND ci.id IS NULL
-               ORDER BY v.data_ora_partenza""",
-            (nome, cognome)
+            Q.get('checkin_by_nome_cognome'), {'nome': nome, 'cognome': cognome}
         )
         if not risultati:
             return jsonify({"errore": "Nessuna prenotazione pagata trovata per questo passeggero"}), 404
@@ -1680,23 +1491,12 @@ def operatore_checkin():
     if not documento:
         return jsonify({"errore": "Fornire documento, codice_prenotazione oppure nome e cognome"}), 400
 
-    passeggero = query_row("SELECT * FROM passeggeri WHERE documento = ?", (documento,))
+    passeggero = query_row(Q.get('passeggero_by_doc_full'), {'documento': documento})
     if not passeggero:
         return jsonify({"errore": "Nessun passeggero trovato con questo documento"}), 404
 
     prenotazioni_idonee = query_rows(
-        """SELECT p.id, p.codice_prenotazione, p.volo_id,
-                  v.codice_volo, v.origine, v.destinazione, v.data_ora_partenza,
-                  v.posti_totali, v.gate_id,
-                  pass.nome AS passeggero_nome, pass.cognome AS passeggero_cognome,
-                  pass.documento
-           FROM   prenotazioni p
-           JOIN   voli v          ON p.volo_id = v.id
-           JOIN   passeggeri pass ON p.passeggero_id = pass.id
-           LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-           WHERE  p.passeggero_id = ? AND p.stato = 'pagata' AND ci.id IS NULL
-           ORDER BY v.data_ora_partenza""",
-        (passeggero['id'],)
+        Q.get('checkin_by_documento'), {'passeggero_id': passeggero['id']}
     )
     if not prenotazioni_idonee:
         return jsonify({"errore": "Nessuna prenotazione 'pagata' senza carta d'imbarco trovata"}), 404
@@ -1711,12 +1511,11 @@ def operatore_checkin():
             conn.execute("BEGIN")
             numero_posto = _genera_posto(conn, pren['volo_id'], pren['posti_totali'])
             cur = conn.execute(
-                "INSERT INTO carte_imbarco (prenotazione_id, numero_posto, gate_imbarco_id, operatore_id)"
-                " VALUES (?, ?, ?, ?)",
-                (pren['id'], numero_posto, pren['gate_id'], operatore_id)
+                Q.get('insert_carta_imbarco_banco'),
+                {'pren_id': pren['id'], 'numero_posto': numero_posto, 'gate_id': pren['gate_id'], 'operatore_id': operatore_id}
             )
             carta_id = cur.lastrowid
-            conn.execute("UPDATE prenotazioni SET stato = 'imbarcato' WHERE id = ?", (pren['id'],))
+            conn.execute(Q.get('update_pren_imbarcato'), {'id': pren['id']})
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -1754,16 +1553,11 @@ def operatore_checkin_exec():
     if not prenotazione_id:
         return jsonify({"errore": "prenotazione_id obbligatorio"}), 400
 
-    pren = query_row(
-        """SELECT p.*, v.posti_totali, v.gate_id AS volo_gate_id
-           FROM prenotazioni p JOIN voli v ON p.volo_id = v.id
-           WHERE p.id = ? AND p.stato = 'pagata'""",
-        (prenotazione_id,)
-    )
+    pren = query_row(Q.get('pren_checkin_exec'), {'id': prenotazione_id})
     if not pren:
         return jsonify({"errore": "Prenotazione non trovata o non in stato 'pagata'"}), 404
 
-    if query_row("SELECT id FROM carte_imbarco WHERE prenotazione_id = ?", (prenotazione_id,)):
+    if query_row(Q.get('carta_by_pren'), {'pren_id': prenotazione_id}):
         return jsonify({"errore": "Carta d'imbarco già emessa"}), 409
 
     operatore_id = session['utente_id']
@@ -1775,11 +1569,11 @@ def operatore_checkin_exec():
         if not numero_posto:
             numero_posto = _genera_posto(conn, pren['volo_id'], pren['posti_totali'])
         cur = conn.execute(
-            "INSERT INTO carte_imbarco (prenotazione_id, numero_posto, gate_imbarco_id, operatore_id) VALUES (?, ?, ?, ?)",
-            (prenotazione_id, numero_posto, gate_id, operatore_id)
+            Q.get('insert_carta_imbarco_banco'),
+            {'pren_id': prenotazione_id, 'numero_posto': numero_posto, 'gate_id': gate_id, 'operatore_id': operatore_id}
         )
         carta_id = cur.lastrowid
-        conn.execute("UPDATE prenotazioni SET stato = 'imbarcato' WHERE id = ?", (prenotazione_id,))
+        conn.execute(Q.get('update_pren_imbarcato'), {'id': prenotazione_id})
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -1791,12 +1585,7 @@ def operatore_checkin_exec():
                  {'prenotazione_id': prenotazione_id, 'numero_posto': numero_posto})
 
     # Recupera nome passeggero per il messaggio di conferma
-    pass_row = query_row(
-        """SELECT pas.nome || ' ' || pas.cognome AS nominativo
-           FROM prenotazioni pr JOIN passeggeri pas ON pr.passeggero_id = pas.id
-           WHERE pr.id = ?""",
-        (prenotazione_id,)
-    )
+    pass_row = query_row(Q.get('nominativo_passeggero'), {'pren_id': prenotazione_id})
 
     return jsonify({
         "messaggio":        "Check-in completato",
@@ -1817,20 +1606,20 @@ def admin_stats():
     """GET /api/admin/stats — statistiche aggregate del sistema."""
     stats = {
         "voli": {
-            "totale":    query_row("SELECT COUNT(*) AS n FROM voli")['n'],
-            "per_stato": query_rows("SELECT stato, COUNT(*) AS numero FROM voli GROUP BY stato ORDER BY stato"),
+            "totale":    query_row(Q.get('admin_stats_voli_totale'))['n'],
+            "per_stato": query_rows(Q.get('admin_stats_voli_per_stato')),
         },
         "prenotazioni": {
-            "totale":    query_row("SELECT COUNT(*) AS n FROM prenotazioni")['n'],
-            "per_stato": query_rows("SELECT stato, COUNT(*) AS numero FROM prenotazioni GROUP BY stato ORDER BY stato"),
+            "totale":    query_row(Q.get('admin_stats_pren_totale'))['n'],
+            "per_stato": query_rows(Q.get('admin_stats_pren_per_stato')),
         },
-        "passeggeri":   query_row("SELECT COUNT(*) AS n FROM passeggeri")['n'],
-        "compagnie":    query_row("SELECT COUNT(*) AS n FROM compagnie_aeree")['n'],
+        "passeggeri":   query_row(Q.get('admin_stats_passeggeri'))['n'],
+        "compagnie":    query_row(Q.get('admin_stats_compagnie'))['n'],
         "gate": {
-            "totale":    query_row("SELECT COUNT(*) AS n FROM gate")['n'],
-            "per_stato": query_rows("SELECT stato, COUNT(*) AS numero FROM gate GROUP BY stato ORDER BY stato"),
+            "totale":    query_row(Q.get('admin_stats_gate_totale'))['n'],
+            "per_stato": query_rows(Q.get('admin_stats_gate_per_stato')),
         },
-        "carte_imbarco": query_row("SELECT COUNT(*) AS n FROM carte_imbarco")['n'],
+        "carte_imbarco": query_row(Q.get('admin_stats_carte'))['n'],
     }
     return jsonify(stats)
 
@@ -1843,31 +1632,9 @@ def admin_storico_voli():
     compagnia_id = request.args.get('compagnia_id', '').strip()
     data         = request.args.get('data', '').strip()
 
-    sql = """
-        SELECT v.id, v.codice_volo, c.nome AS compagnia, c.id AS compagnia_id,
-               g.codice AS gate, v.origine, v.destinazione,
-               v.data_ora_partenza, v.data_ora_arrivo, v.posti_totali, v.stato,
-               COALESCE((
-                   SELECT COUNT(*) FROM prenotazioni p
-                   WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
-               ), 0) AS posti_occupati
-        FROM   voli v
-        JOIN   compagnie_aeree c ON v.compagnia_id = c.id
-        LEFT JOIN gate g         ON v.gate_id = g.id
-        WHERE  1=1
-    """
-    params = []
-    if stato:
-        sql += " AND v.stato = ?"
-        params.append(stato)
-    if compagnia_id:
-        sql += " AND v.compagnia_id = ?"
-        params.append(int(compagnia_id))
-    if data:
-        sql += " AND DATE(v.data_ora_partenza) = ?"
-        params.append(data)
-    sql += " ORDER BY v.data_ora_partenza DESC"
-    return jsonify(query_rows(sql, params))
+    cid = int(compagnia_id) if compagnia_id else None
+    sql = Q.render('admin_storico_voli', stato=stato, compagnia_id=cid, data=data)
+    return jsonify(query_rows(sql, {'stato': stato, 'compagnia_id': cid, 'data': data}))
 
 
 @app.route('/api/admin/aeroporti', methods=['POST'])
@@ -1895,8 +1662,8 @@ def admin_crea_aeroporto():
     nome = (dati.get('nome') or '').strip()
     try:
         aid = db_execute(
-            "INSERT INTO aeroporti (codice, nome, lat, lon) VALUES (?, ?, ?, ?)",
-            (codice, nome, lat, lon)
+            Q.get('insert_aeroporto'),
+            {'codice': codice, 'nome': nome, 'lat': lat, 'lon': lon}
         )
         return jsonify({"messaggio": "Aeroporto inserito", "aeroporto_id": aid}), 201
     except sqlite3.IntegrityError:
@@ -1907,15 +1674,7 @@ def admin_crea_aeroporto():
 @ruolo_richiesto('admin')
 def admin_lista_utenti():
     """GET /api/admin/utenti — tutti gli utenti con dati associati."""
-    utenti = query_rows(
-        """SELECT u.id, u.username, u.ruolo, u.attivo,
-                  u.compagnia_id, c.nome AS compagnia_nome,
-                  u.passeggero_id, p.nome AS passeggero_nome, p.cognome AS passeggero_cognome
-           FROM   utenti u
-           LEFT JOIN compagnie_aeree c ON u.compagnia_id = c.id
-           LEFT JOIN passeggeri p      ON u.passeggero_id = p.id
-           ORDER BY u.id"""
-    )
+    utenti = query_rows(Q.get('admin_lista_utenti'))
     return jsonify(utenti)
 
 
@@ -1930,11 +1689,11 @@ def admin_modifica_utente(id):
     if 'attivo' not in dati:
         return jsonify({"errore": "Campo 'attivo' obbligatorio"}), 400
 
-    if not query_row("SELECT id FROM utenti WHERE id = ?", (id,)):
+    if not query_row(Q.get('utente_by_id'), {'id': id}):
         return jsonify({"errore": "Utente non trovato"}), 404
 
     attivo = int(bool(dati['attivo']))
-    db_execute("UPDATE utenti SET attivo = ? WHERE id = ?", (attivo, id))
+    db_execute(Q.get('update_utente_attivo'), {'attivo': attivo, 'id': id})
 
     azione = 'sblocco_utente' if attivo else 'blocco_utente'
     registra_log(azione, session['utente_id'], {'utente_id_target': id})
@@ -1949,18 +1708,13 @@ def admin_elimina_utente(id):
     if id == session['utente_id']:
         return jsonify({"errore": "Non puoi eliminare il tuo stesso account"}), 400
 
-    utente = query_row(
-        """SELECT u.*, c.nome AS compagnia_nome FROM utenti u
-           LEFT JOIN compagnie_aeree c ON u.compagnia_id = c.id WHERE u.id = ?""",
-        (id,)
-    )
+    utente = query_row(Q.get('utente_full_admin'), {'id': id})
     if not utente:
         return jsonify({"errore": "Utente non trovato"}), 404
 
     if utente['ruolo'] == 'compagnia' and utente['compagnia_id']:
         voli_attivi = query_row(
-            "SELECT COUNT(*) AS n FROM voli WHERE compagnia_id = ? AND stato = 'programmato'",
-            (utente['compagnia_id'],)
+            Q.get('voli_compagnia_programmati'), {'compagnia_id': utente['compagnia_id']}
         )
         if voli_attivi['n'] > 0:
             return jsonify({
@@ -1970,15 +1724,14 @@ def admin_elimina_utente(id):
 
     if utente['ruolo'] == 'passeggero' and utente['passeggero_id']:
         pren_attive = query_row(
-            "SELECT COUNT(*) AS n FROM prenotazioni WHERE passeggero_id = ? AND stato IN ('prenotata', 'pagata')",
-            (utente['passeggero_id'],)
+            Q.get('pren_attive_passeggero'), {'passeggero_id': utente['passeggero_id']}
         )
         if pren_attive['n'] > 0:
             return jsonify({
                 "errore": f"Impossibile eliminare: il passeggero ha {pren_attive['n']} prenotazione/i attiva/e."
             }), 400
 
-    db_execute("DELETE FROM utenti WHERE id = ?", (id,))
+    db_execute(Q.get('delete_utente'), {'id': id})
     registra_log('eliminazione_utente', session['utente_id'],
                  {'utente_id_target': id, 'username': utente['username']})
 
@@ -2069,33 +1822,15 @@ def admin_log():
     except ValueError:
         limite = 100
 
-    sql = """
-        SELECT l.id, l.utente_id, u.username,
-               l.azione, l.dettagli, l.timestamp
-        FROM   log l
-        LEFT JOIN utenti u ON l.utente_id = u.id
-        WHERE  1=1
-    """
-    params = []
-    if azione:
-        sql += " AND l.azione = ?"
-        params.append(azione)
+    uid = None
     if utente_id:
         try:
-            sql += " AND l.utente_id = ?"
-            params.append(int(utente_id))
+            uid = int(utente_id)
         except ValueError:
             pass
-    if data_da:
-        sql += " AND DATE(l.timestamp) >= ?"
-        params.append(data_da)
-    if data_a:
-        sql += " AND DATE(l.timestamp) <= ?"
-        params.append(data_a)
-    sql += " ORDER BY l.timestamp DESC LIMIT ?"
-    params.append(limite)
 
-    return jsonify(query_rows(sql, params))
+    sql = Q.render('admin_log', azione=azione, utente_id=uid, data_da=data_da, data_a=data_a)
+    return jsonify(query_rows(sql, {'azione': azione, 'utente_id': uid, 'data_da': data_da, 'data_a': data_a, 'limite': limite}))
 
 
 # =============================================================================
@@ -2118,14 +1853,7 @@ def notifiche():
         pid = session['passeggero_id']
 
         # Prenotazioni/pagamenti/check-in recenti (ultimi 7 giorni)
-        eventi = query_rows(
-            """SELECT p.id, p.codice_prenotazione, p.data_prenotazione,
-                      p.prezzo, p.stato, v.codice_volo
-               FROM prenotazioni p JOIN voli v ON p.volo_id = v.id
-               WHERE p.passeggero_id = ? AND p.data_prenotazione >= datetime('now', '-7 days')
-               ORDER BY p.data_prenotazione DESC""",
-            (pid,)
-        )
+        eventi = query_rows(Q.get('notif_eventi_recenti'), {'passeggero_id': pid})
         for e in eventi:
             icone = {
                 'prenotata':  'bi-ticket',
@@ -2148,13 +1876,7 @@ def notifiche():
             })
 
         # Ricariche recenti (dal log)
-        ricariche = query_rows(
-            """SELECT l.dettagli, l.timestamp FROM log l
-               WHERE l.utente_id = ? AND l.azione = 'ricarica_crediti'
-                 AND l.timestamp >= datetime('now', '-7 days')
-               ORDER BY l.timestamp DESC""",
-            (session['utente_id'],)
-        )
+        ricariche = query_rows(Q.get('notif_ricariche'), {'utente_id': session['utente_id']})
         for r in ricariche:
             try:
                 importo = json.loads(r['dettagli'] or '{}').get('importo', '?')
@@ -2169,17 +1891,7 @@ def notifiche():
             })
 
         # Partenze imminenti (prossime 24h)
-        imminenti = query_rows(
-            """SELECT p.codice_prenotazione, v.codice_volo, v.destinazione,
-                      v.data_ora_partenza, v.orario_stimato
-               FROM prenotazioni p JOIN voli v ON p.volo_id = v.id
-               WHERE p.passeggero_id = ? AND p.stato IN ('pagata', 'imbarcato')
-                 AND v.stato = 'programmato'
-                 AND datetime(COALESCE(v.orario_stimato, v.data_ora_partenza))
-                     BETWEEN datetime('now') AND datetime('now', '+24 hours')
-               ORDER BY v.data_ora_partenza""",
-            (pid,)
-        )
+        imminenti = query_rows(Q.get('notif_imminenti'), {'passeggero_id': pid})
         for i in imminenti:
             orario = i['orario_stimato'] or i['data_ora_partenza']
             try:
@@ -2195,13 +1907,7 @@ def notifiche():
             })
 
         # Ritardi attivi
-        ritardi = query_rows(
-            """SELECT p.codice_prenotazione, v.codice_volo, v.orario_stimato
-               FROM prenotazioni p JOIN voli v ON p.volo_id = v.id
-               WHERE p.passeggero_id = ? AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
-                 AND v.stato = 'programmato' AND v.orario_stimato IS NOT NULL""",
-            (pid,)
-        )
+        ritardi = query_rows(Q.get('notif_ritardi'), {'passeggero_id': pid})
         for r in ritardi:
             risultato.append({
                 'id':        f"ritardo_{r['codice_prenotazione']}",
@@ -2213,14 +1919,7 @@ def notifiche():
 
     elif ruolo == 'compagnia':
         cid = session['compagnia_id']
-        nuove = query_rows(
-            """SELECT v.codice_volo, COUNT(*) AS n
-               FROM prenotazioni p JOIN voli v ON p.volo_id = v.id
-               WHERE v.compagnia_id = ? AND p.data_prenotazione >= datetime('now', '-7 days')
-                 AND p.stato != 'cancellata'
-               GROUP BY v.codice_volo ORDER BY n DESC""",
-            (cid,)
-        )
+        nuove = query_rows(Q.get('notif_compagnia_prenotazioni'), {'compagnia_id': cid})
         for n in nuove:
             risultato.append({
                 'id':        f"pren_compagnia_{n['codice_volo']}",
@@ -2232,15 +1931,7 @@ def notifiche():
 
     elif ruolo == 'operatore':
         oggi = ora_dt.strftime('%Y-%m-%d')
-        pendenti = query_rows(
-            """SELECT v.codice_volo, COUNT(*) AS n
-               FROM prenotazioni p
-               JOIN voli v ON p.volo_id = v.id
-               LEFT JOIN carte_imbarco ci ON ci.prenotazione_id = p.id
-               WHERE DATE(v.data_ora_partenza) = ? AND p.stato = 'pagata' AND ci.id IS NULL
-               GROUP BY v.codice_volo""",
-            (oggi,)
-        )
+        pendenti = query_rows(Q.get('notif_operatore_pendenti'), {'oggi': oggi})
         for pend in pendenti:
             risultato.append({
                 'id':        f"checkin_pend_{pend['codice_volo']}_{oggi}",
@@ -2251,9 +1942,7 @@ def notifiche():
             })
 
     elif ruolo == 'admin':
-        nuovi_reg = query_row(
-            "SELECT COUNT(*) AS n FROM log WHERE azione = 'registrazione' AND timestamp >= datetime('now', '-7 days')"
-        )
+        nuovi_reg = query_row(Q.get('notif_admin_nuovi_utenti'))
         if nuovi_reg and nuovi_reg['n'] > 0:
             risultato.append({
                 'id':        f"nuovi_utenti_{ora_dt.date()}",
@@ -2262,9 +1951,7 @@ def notifiche():
                 'timestamp': ora_dt.strftime('%Y-%m-%d %H:%M:%S'),
                 'tipo':      'admin',
             })
-        login_fail = query_row(
-            "SELECT COUNT(*) AS n FROM log WHERE azione = 'login_failed' AND timestamp >= datetime('now', '-1 day')"
-        )
+        login_fail = query_row(Q.get('notif_admin_login_fail'))
         if login_fail and login_fail['n'] > 0:
             risultato.append({
                 'id':        f"login_falliti_{ora_dt.date()}",

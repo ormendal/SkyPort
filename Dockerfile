@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia il codice dell'applicazione, lo schema del database e i test
 COPY web/ web/
+COPY db/ db/
 COPY schema.sql .
 COPY tests/ tests/
 
