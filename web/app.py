@@ -34,7 +34,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'chiave-segreta-sviluppo-aeroporto
 
 BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH     = os.path.join(BASE_DIR, 'data', 'aeroporto.db')
-SCHEMA_PATH = os.path.join(BASE_DIR, 'schema.sql')
+SCHEMA_PATH = os.path.join(BASE_DIR, 'db', 'schema.sql')
 
 # Aggiunge la radice del progetto al path per importare db.query_loader
 if BASE_DIR not in sys.path:

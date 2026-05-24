@@ -20,7 +20,7 @@ import app as flask_app  # noqa: E402
 
 # Percorso assoluto allo schema SQL (relativo a questo file)
 _SCHEMA_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), '..', 'schema.sql')
+    os.path.join(os.path.dirname(__file__), '..', 'db', 'schema.sql')
 )
 
 
