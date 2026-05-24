@@ -62,6 +62,7 @@ aeroporto/
 | `utenti` | Autenticazione e ruoli (admin / operatore / compagnia / passeggero) |
 | `carte_imbarco` | Una per prenotazione; `operatore_id NULL` = check-in online |
 | `aeroporti` | Coordinate geografiche IATA per la mappa interattiva |
+| `log` | Registro eventi di sistema (login, prenotazioni, pagamenti, check-in, backup) |
 
 ### Relazioni principali
 
@@ -111,7 +112,10 @@ pytest tests/
 
 I test usano un database SQLite temporaneo e isolato per ogni caso di test (`tmp_path` di pytest), senza toccare il database di produzione.
 
-Il database SQLite viene creato automaticamente in `data/aeroporto.db` al primo avvio con dati di esempio precaricati (3 compagnie, 6 gate, 16 voli, 20 passeggeri, 43 prenotazioni, 11 carte d'imbarco, 12 aeroporti).
+Il database SQLite viene creato automaticamente in `data/aeroporto.db`
+al primo avvio con dati di esempio precaricati (3 compagnie, 6 gate,
+16 voli, 20 passeggeri, 43 prenotazioni, 11 carte d'imbarco, 12 aeroporti).
+I dati crescono ad ogni utilizzo dell'interfaccia.
 
 ### In locale (senza Docker)
 
@@ -167,6 +171,9 @@ python web/app.py
 - Effettua il check-in online (assegna posto e gate automaticamente)
 - Visualizza la carta d'imbarco
 - Modifica nome, cognome e documento del profilo
+- Cancella la prenotazione (solo se in stato "prenotata", penale del 10%)
+- Valuta i voli completati con un punteggio da 1 a 5 stelle
+- Ricarica il portafoglio crediti (simulato)
 
 ### Compagnia aerea
 - Visualizza tutti i propri voli con stato e disponibilità
@@ -207,46 +214,68 @@ python web/app.py
 | GET | `/login` | Pagina login/registrazione |
 | POST | `/api/login` | Login — body: `{username, password}` |
 | POST | `/api/logout` | Logout |
-| POST | `/api/registrazione` | Registrazione passeggero |
+| POST | `/api/registrazione` | Registrazione passeggero — body: `{nome, cognome, documento, username, password}` |
 
 ### Passeggero (ruolo: passeggero)
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | GET | `/dashboard/passeggero` | Dashboard passeggero |
-| POST | `/api/prenota` | Prenota un volo — body: `{volo_id, prezzo}` |
-| GET | `/api/mie_prenotazioni` | Elenco prenotazioni con carte d'imbarco |
-| POST | `/api/paga/<id>` | Pagamento simulato |
-| POST | `/api/checkin_online/<id>` | Check-in online: assegna posto e gate |
+| POST | `/api/prenota` | Prenota un volo — body: `{volo_id}` |
+| GET | `/api/mie_prenotazioni` | Elenco prenotazioni con stato e carta d'imbarco |
+| POST | `/api/paga/<id>` | Pagamento simulato (scala crediti dal portafoglio) |
+| DELETE | `/api/cancella/<id>` | Cancella prenotazione in stato "prenotata" (penale 10%) |
+| POST | `/api/checkin_online/<id>` | Check-in online: assegna posto e gate automaticamente |
+| POST | `/api/valuta/<id>` | Valuta volo completato — body: `{stelle}` (1–5) |
+| POST | `/api/passeggero/ricarica` | Ricarica portafoglio — body: `{importo}` |
+| GET | `/api/passeggero/profilo` | Dati profilo passeggero (nome, cognome, documento, crediti) |
 | PUT | `/api/passeggero/profilo` | Aggiorna nome, cognome, documento |
+| GET | `/api/passeggero/notifiche` | Notifiche recenti (eventi, ricariche, voli imminenti, ritardi) |
+| GET | `/api/volo/<id>` | Dettaglio singolo volo (orari, gate, disponibilità) |
+| GET | `/api/volo/<id>/valutazione` | Valutazione media del volo e numero di voti |
 
 ### Compagnia (ruolo: compagnia)
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | GET | `/dashboard/compagnia` | Dashboard compagnia |
-| GET | `/api/compagnia/voli` | Elenco voli con disponibilità |
-| POST | `/api/compagnia/voli` | Crea nuovo volo |
+| GET | `/api/compagnia/voli` | Elenco voli della compagnia con disponibilità e valutazioni |
+| POST | `/api/compagnia/voli` | Crea nuovo volo — body: `{codice_volo, origine, destinazione, data_ora_partenza, data_ora_arrivo, posti_totali, gate_id, prezzo_base}` |
 | PUT | `/api/compagnia/voli/<id>` | Modifica volo (gate, orari, posti, stato) |
 | DELETE | `/api/compagnia/voli/<id>` | Elimina volo (solo programmato senza prenotazioni attive) |
+| GET | `/api/compagnia/notifiche` | Notifiche nuove prenotazioni sui propri voli |
 
 ### Operatore (ruolo: operatore)
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | GET | `/dashboard/operatore` | Dashboard operatore |
-| GET | `/api/operatore/gate` | Stato gate con voli assegnati |
-| PUT | `/api/operatore/gate/<id>` | Cambia stato gate |
-| POST | `/api/operatore/checkin` | Check-in al banco per documento passeggero |
+| GET | `/api/operatore/gate` | Stato di tutti i gate con voli assegnati |
+| PUT | `/api/operatore/gate/<id>` | Cambia stato gate — body: `{stato}` (libero/occupato/manutenzione) |
+| POST | `/api/operatore/checkin` | Check-in al banco — body: `{documento}` (cerca per documento, PNR o nome) |
+| POST | `/api/operatore/checkin/<id>` | Check-in al banco su prenotazione specifica (disambiguazione) |
+| GET | `/api/operatore/notifiche` | Notifiche passeggeri in attesa di check-in al banco |
 
 ### Admin (ruolo: admin)
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | GET | `/dashboard/admin` | Dashboard admin |
-| GET | `/api/admin/stats` | Statistiche aggregate del sistema |
-| GET | `/api/admin/voli?stato=&compagnia_id=&data=` | Storico voli con filtri |
-| POST | `/api/admin/aeroporti` | Inserisce nuovo aeroporto con coordinate |
+| GET | `/api/admin/stats` | Statistiche aggregate (voli, prenotazioni, passeggeri, gate, carte, ricavi) |
+| GET | `/api/admin/voli?stato=&compagnia_id=&data=` | Storico voli con filtri opzionali |
+| POST | `/api/admin/aeroporti` | Inserisce nuovo aeroporto — body: `{codice, nome, lat, lon}` |
+| GET | `/api/admin/log?azione=&utente_id=&data_da=&data_a=&limite=` | Log eventi di sistema con filtri |
+| GET | `/api/admin/utenti` | Elenco utenti con ruolo e stato |
+| PUT | `/api/admin/utenti/<id>` | Modifica stato utente (attivo/bloccato) |
+| GET | `/api/admin/passeggeri` | Elenco passeggeri con crediti e numero prenotazioni |
+| GET | `/api/admin/gate` | Stato di tutti i gate |
+| GET | `/api/admin/notifiche` | Notifiche nuovi utenti e tentativi di login falliti |
+
+### Trasversale (qualsiasi ruolo autenticato)
+
+| Metodo | Endpoint | Descrizione |
+|--------|----------|-------------|
+| GET | `/api/notifiche` | Notifiche contestuali al ruolo dell'utente loggato |
 
 ---
 
