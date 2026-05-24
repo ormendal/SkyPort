@@ -13,10 +13,14 @@ aeroporto/
 ├── Dockerfile              # Immagine Docker (python:3.10-slim)
 ├── docker-compose.yml      # Orchestrazione servizi + volume dati
 ├── requirements.txt        # Dipendenze Python (Flask, Werkzeug)
-├── schema.sql              # DDL: definizione delle 8 tabelle SQLite
 ├── DESIGN.md               # Design system: palette, tipografia, componenti
 ├── PRODUCT.md              # Contesto di prodotto: ruoli, principi, anti-pattern
 ├── data/                   # Volume Docker — contiene aeroporto.db
+├── db/
+│   ├── __init__.py
+│   ├── schema.sql          # DDL: definizione delle 9 tabelle SQLite
+│   ├── queries.sql         # Tutte le query SQL esternalizzate (Jinja2)
+│   └── query_loader.py     # Loader: parsing queries.sql + rendering Jinja2
 └── web/
     ├── app.py              # Applicazione Flask: API REST + route template
     ├── static/
@@ -37,6 +41,7 @@ aeroporto/
 |---------|-----------|------|
 | Database | SQLite 3 | Gestito da `sqlite3` stdlib; `PRAGMA foreign_keys = ON` |
 | Backend | Flask 3.0.3 | REST API + Jinja2 template rendering |
+| Query SQL | `db/queries.sql` + Jinja2 | Query esternalizzate; template dinamici per filtri opzionali |
 | Autenticazione | Flask sessions + cookie | `werkzeug.security` per hash password |
 | Frontend | HTML5 + Bootstrap 5 CDN | Vanilla JS (Fetch API), nessun framework |
 | Icone | Bootstrap Icons 1.11 CDN | Standard 16/20/24px |
@@ -106,7 +111,7 @@ pytest tests/
 
 I test usano un database SQLite temporaneo e isolato per ogni caso di test (`tmp_path` di pytest), senza toccare il database di produzione.
 
-Il database SQLite viene creato automaticamente in `data/aeroporto.db` al primo avvio con dati di esempio precaricati (2 compagnie, 3 gate, 5 voli, 10 passeggeri, 14 prenotazioni, 3 carte d'imbarco, 6 aeroporti).
+Il database SQLite viene creato automaticamente in `data/aeroporto.db` al primo avvio con dati di esempio precaricati (3 compagnie, 6 gate, 16 voli, 20 passeggeri, 43 prenotazioni, 11 carte d'imbarco, 12 aeroporti).
 
 ### In locale (senza Docker)
 
@@ -131,10 +136,25 @@ python web/app.py
 | `operatore1` | `password` | operatore | Check-in al banco |
 | `operatore2` | `password` | operatore | Check-in al banco |
 | `mario.rossi` | `password` | passeggero | Mario Rossi — crediti €500 |
+| `laura.bianchi` | `password` | passeggero | **Account bloccato** (test admin) — crediti €200 |
 | `giuseppe.verdi` | `password` | passeggero | Giuseppe Verdi — crediti €150 |
 | `anna.ferrari` | `password` | passeggero | Anna Ferrari — crediti €0 |
+| `luca.romano` | `password` | passeggero | Luca Romano — crediti €0 |
+| `sofia.esposito` | `password` | passeggero | Sofia Esposito — crediti €0 |
+| `marco.conti` | `password` | passeggero | Marco Conti — crediti €0 |
+| `elena.ricci` | `password` | passeggero | Elena Ricci — crediti €0 |
+| `paolo.lombardi` | `password` | passeggero | Paolo Lombardi — crediti €0 |
+| `giulia.mancini` | `password` | passeggero | Giulia Mancini — crediti €0 |
+| `francesco.bruno` | `password` | passeggero | Francesco Bruno — crediti €300 |
+| `chiara.deluca` | `password` | passeggero | Chiara De Luca — crediti €50 |
 | `roberto.galli` | `password` | passeggero | Roberto Galli — crediti €1000 |
-| `laura.bianchi` | `password` | passeggero | **Account bloccato** (test admin) |
+| `valentina.marini` | `password` | passeggero | Valentina Marini — crediti €0 |
+| `andrea.moretti` | `password` | passeggero | Andrea Moretti — crediti €180 |
+| `serena.costa` | `password` | passeggero | Serena Costa — crediti €75 |
+| `matteo.ferretti` | `password` | passeggero | Matteo Ferretti — crediti €0 |
+| `alessia.pellegrini` | `password` | passeggero | Alessia Pellegrini — crediti €250 |
+| `davide.caruso` | `password` | passeggero | Davide Caruso — crediti €0 |
+| `monica.santoro` | `password` | passeggero | Monica Santoro — crediti €400 |
 
 ---
 
@@ -306,8 +326,15 @@ curl -c cookie.txt -X POST http://localhost:5000/api/admin/aeroporti \
 - Le chiavi esterne SQLite sono abilitate con `PRAGMA foreign_keys = ON` su ogni connessione.
 
 ### Database e migrazioni
-- Il file `schema.sql` usa `CREATE TABLE IF NOT EXISTS` su tutte le tabelle: è idempotente e non distrugge i dati ad ogni riavvio.
+- Il file `db/schema.sql` usa `CREATE TABLE IF NOT EXISTS` su tutte le tabelle: è idempotente e non distrugge i dati ad ogni riavvio.
 - Il seed degli aeroporti (`_seed_aeroporti`) viene eseguito separatamente dal seed principale, garantendo la compatibilità con database già inizializzati prima dell'introduzione della tabella `aeroporti`.
+
+### Query esternalizzate
+Le query SQL operative sono definite in `db/queries.sql` con marcatori `-- :nome_query`.
+Il modulo `db/query_loader.py` le carica all'avvio, le cachea in un dizionario e usa
+Jinja2 per compilare le query dinamiche (quelle con filtri opzionali come `{% if campo %}`).
+In `web/app.py` ogni query si richiama con `Q.get('nome')` per le statiche
+e `Q.render('nome', **kwargs)` per le dinamiche.
 
 ### Mappa interattiva
 - Usa le tile CartoDB Positron (sfondo neutro, adatto alla palette navy/gold).
