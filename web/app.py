@@ -807,6 +807,8 @@ def cerca_voli():
     if data:
         sql += " AND DATE(v.data_ora_partenza) = ?"
         params.append(data)
+    # Escludi i voli con data/ora di partenza già passata (non prenotabili)
+    sql += " AND v.data_ora_partenza > datetime('now', 'localtime')"
     sql += " ORDER BY v.data_ora_partenza"
     return jsonify(query_rows(sql, params))
 
@@ -1371,6 +1373,19 @@ def compagnia_crea_volo():
     except (ValueError, TypeError):
         return jsonify({"errore": "prezzo_base deve essere un numero non negativo"}), 400
 
+    # Validazione temporale: la data di partenza non può essere nel passato
+    try:
+        _normalizza = lambda s: s.strip().replace('T', ' ')[:16]
+        dt_partenza = datetime.strptime(_normalizza(dati['data_ora_partenza']), '%Y-%m-%d %H:%M')
+        dt_arrivo   = datetime.strptime(_normalizza(dati['data_ora_arrivo']),   '%Y-%m-%d %H:%M')
+    except (ValueError, AttributeError):
+        return jsonify({"errore": "Formato data/ora non valido (atteso: YYYY-MM-DD HH:MM)"}), 400
+
+    if dt_partenza <= datetime.now():
+        return jsonify({"errore": "Non è possibile creare un volo con data di partenza nel passato"}), 400
+    if dt_arrivo <= dt_partenza:
+        return jsonify({"errore": "La data e ora di arrivo deve essere successiva alla data e ora di partenza"}), 400
+
     compagnia_id = session['compagnia_id']
     try:
         volo_id = db_execute(
@@ -1454,6 +1469,23 @@ def compagnia_modifica_volo(id):
             raise ValueError
     except (ValueError, TypeError):
         return jsonify({"errore": "prezzo_base deve essere un numero non negativo"}), 400
+
+    # Validazione temporale: controlla le date solo se vengono modificate
+    nuova_partenza = dati.get('data_ora_partenza', volo['data_ora_partenza'])
+    nuova_arrivo   = dati.get('data_ora_arrivo',   volo['data_ora_arrivo'])
+    try:
+        _norm = lambda s: str(s).strip().replace('T', ' ')[:16]
+        dt_partenza = datetime.strptime(_norm(nuova_partenza), '%Y-%m-%d %H:%M')
+        dt_arrivo   = datetime.strptime(_norm(nuova_arrivo),   '%Y-%m-%d %H:%M')
+    except (ValueError, AttributeError):
+        return jsonify({"errore": "Formato data/ora non valido (atteso: YYYY-MM-DD HH:MM)"}), 400
+
+    # Impedisce di spostare la partenza nel passato (solo se la data viene cambiata)
+    if 'data_ora_partenza' in dati and dt_partenza <= datetime.now():
+        return jsonify({"errore": "Non è possibile modificare un volo con data di partenza nel passato"}), 400
+    # L'arrivo deve sempre essere successivo alla partenza
+    if dt_arrivo <= dt_partenza:
+        return jsonify({"errore": "La data e ora di arrivo deve essere successiva alla data e ora di partenza"}), 400
 
     # orario_stimato e ritardo_note solo per voli programmato
     orario_stimato = dati.get('orario_stimato', volo.get('orario_stimato'))
@@ -1668,6 +1700,40 @@ def operatore_checkin():
     )
     if not prenotazioni_idonee:
         return jsonify({"errore": "Nessuna prenotazione 'pagata' senza carta d'imbarco trovata"}), 404
+
+    # Se c'è un'unica prenotazione idonea, esegui il check-in automaticamente (legacy)
+    if len(prenotazioni_idonee) == 1:
+        pren         = prenotazioni_idonee[0]
+        operatore_id = session['utente_id']
+
+        conn = get_db()
+        try:
+            conn.execute("BEGIN")
+            numero_posto = _genera_posto(conn, pren['volo_id'], pren['posti_totali'])
+            cur = conn.execute(
+                "INSERT INTO carte_imbarco (prenotazione_id, numero_posto, gate_imbarco_id, operatore_id)"
+                " VALUES (?, ?, ?, ?)",
+                (pren['id'], numero_posto, pren['gate_id'], operatore_id)
+            )
+            carta_id = cur.lastrowid
+            conn.execute("UPDATE prenotazioni SET stato = 'imbarcato' WHERE id = ?", (pren['id'],))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"errore": str(e)}), 500
+        finally:
+            conn.close()
+
+        registra_log('checkin_banco', operatore_id,
+                     {'prenotazione_id': pren['id'], 'numero_posto': numero_posto})
+
+        return jsonify({
+            "messaggio":        "Check-in completato",
+            "carta_imbarco_id": carta_id,
+            "numero_posto":     numero_posto,
+            "gate_imbarco_id":  pren['gate_id'],
+            "passeggero":       f"{passeggero['nome']} {passeggero['cognome']}",
+        }), 201
 
     return jsonify({"prenotazioni_disponibili": prenotazioni_idonee})
 

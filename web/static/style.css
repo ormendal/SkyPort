@@ -1481,13 +1481,44 @@ a:hover { color: var(--c-sky); }
 }
 [data-bs-theme="dark"] .ricevuta-cell-value.highlight { color: var(--c-gold); }
 
-/* Stili di stampa: nasconde UI, mostra solo la ricevuta */
+/* Stili di stampa: usa visibility per garantire che il modale sia visibile
+   indipendentemente dallo stato del tema (chiaro/scuro) e dalla classe .open */
 @media print {
-  body > *:not(#modal-ricevuta)                    { display: none !important; }
-  #modal-ricevuta                                  { position: static !important; background: transparent !important; display: block !important; }
-  #modal-ricevuta .modal-panel                     { box-shadow: none !important; max-width: 100% !important; }
+  /* Rendi invisibile tutto il contenuto della pagina */
+  body * {
+    visibility: hidden;
+  }
+  /* Mostra solo il modale della ricevuta e tutto ciò che contiene */
+  #modal-ricevuta,
+  #modal-ricevuta * {
+    visibility: visible;
+  }
+  /* Posiziona il modale nell'angolo in alto a sinistra e occupa tutta la pagina */
+  #modal-ricevuta {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: #fff !important;
+    color: #000 !important;
+    display: block !important;
+  }
+  #modal-ricevuta .modal-panel {
+    box-shadow: none !important;
+    max-width: 100% !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  /* Nasconde il pulsante chiudi e il footer con i bottoni */
   #modal-ricevuta .modal-header button,
-  #modal-ricevuta .modal-footer                    { display: none !important; }
+  #modal-ricevuta .modal-footer {
+    display: none !important;
+  }
+  /* Forza testo nero su sfondo bianco per qualsiasi tema attivo */
+  #modal-ricevuta * {
+    color: #000 !important;
+    background-color: #fff !important;
+  }
 }
 
 /* ── Correzioni dark mode ──────────────────────────────────────────────────── */

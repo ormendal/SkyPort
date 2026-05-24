@@ -164,8 +164,8 @@ def test_overbooking(client):
     conn.close()
     print("  Inserite 2 prenotazioni (pieno)")
 
-    # Tenta una terza prenotazione come passeggero1 (che non ha prenotazioni su questo volo)
-    _login(client, 'passeggero1', 'password')
+    # Tenta una terza prenotazione come mario.rossi (che non ha prenotazioni su OB9999)
+    _login(client, 'mario.rossi', 'password')
     r = client.post('/api/prenota', json={'volo_id': volo_id})
     assert r.status_code == 400
     assert 'Volo completo' in r.get_json()['errore']
@@ -252,25 +252,26 @@ def test_checkin_online(client):
     Il check-in su una prenotazione 'prenotata' deve restituire 400.
     """
     print("\n▶ Avvio test_checkin_online")
-    _login(client, 'passeggero1', 'password')
+    # mario.rossi è il passeggero_id=1 (documento IT00001, crediti 500)
+    _login(client, 'mario.rossi', 'password')
 
-    # Prenotazione 11 (KK7890): passeggero1, volo 5 (EN7890), stato='pagata', senza CI
-    r = client.post('/api/checkin_online/11')
+    # Prenotazione 14 (LL7890): mario.rossi, volo 5 (EN7890), stato='pagata', senza CI
+    r = client.post('/api/checkin_online/14')
     assert r.status_code == 200
     assert 'carta_imbarco_id' in r.get_json()
-    print("  Check-in online su prenotazione 11 riuscito")
+    print("  Check-in online su prenotazione 14 riuscito")
 
     # Verifica che operatore_id sia NULL (il check-in online non ha operatore)
     conn = flask_app.get_db()
     riga = conn.execute(
-        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 11"
+        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 14"
     ).fetchone()
     conn.close()
     assert riga is not None
     assert riga['operatore_id'] is None
     print("  Verificato: operatore_id = NULL")
 
-    # Prenotazione 1 (AA1234): passeggero1, volo 1, stato='prenotata' → non ammesso
+    # Prenotazione 1 (AA1234): mario.rossi, volo 1, stato='prenotata' → non ammesso
     r = client.post('/api/checkin_online/1')
     assert r.status_code == 400
     print("  Check-in online su prenotazione non pagata: 400 (atteso)")
@@ -286,22 +287,25 @@ def test_operatore_checkin(client):
     L'operatore che esegue il check-in al banco deve:
       - restituire 201
       - valorizzare operatore_id nella carta d'imbarco con il proprio utente_id
+
+    mario.rossi (documento IT00001, passeggero_id=1) ha la prenotazione 14 (LL7890)
+    in stato 'pagata' senza carta d'imbarco → unica prenotazione idonea → auto-checkin.
     """
     print("\n▶ Avvio test_operatore_checkin")
     _login(client, 'operatore1', 'password')
 
-    # Passeggero1 (documento IT00001) ha la prenotazione 11 (KK7890) pagata e senza CI
+    # mario.rossi (documento IT00001) ha la prenotazione 14 (LL7890) pagata e senza CI
     r = client.post('/api/operatore/checkin', json={'documento': 'IT00001'})
     assert r.status_code == 201
     print("  Check-in al banco per documento IT00001: 201")
 
-    # Verifica che operatore_id sia valorizzato (utente_id=3 per operatore1 nel seed)
+    # Verifica che operatore_id sia valorizzato (operatore1 ha utente_id=5 nel seed)
     conn = flask_app.get_db()
     riga = conn.execute(
-        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 11"
+        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 14"
     ).fetchone()
     conn.close()
     assert riga is not None
     assert riga['operatore_id'] is not None
-    print(f"  Verificato: operatore_id = {riga['operatore_id']} (valore atteso: 3)")
+    print(f"  Verificato: operatore_id = {riga['operatore_id']} (operatore1, id=5)")
     print("✔ test_operatore_checkin completato con successo")

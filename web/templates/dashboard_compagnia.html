@@ -261,6 +261,8 @@ function apriNuovoVolo() {
   document.getElementById('f-stato-group').style.display = 'none';
   document.getElementById('f-codice').removeAttribute('readonly');
   document.getElementById('modal-volo-error').style.display = 'none';
+  /* Imposta il minimo alla data/ora corrente per impedire date passate */
+  document.getElementById('f-partenza').min = new Date().toISOString().slice(0, 16);
   openModal('modal-volo');
 }
 
@@ -279,6 +281,8 @@ function apriModifica(v) {
   document.getElementById('f-stato').value    = v.stato;
   document.getElementById('f-stato-group').style.display = 'block';
   document.getElementById('modal-volo-error').style.display = 'none';
+  /* Imposta il minimo alla data/ora corrente anche in modifica */
+  document.getElementById('f-partenza').min = new Date().toISOString().slice(0, 16);
   openModal('modal-volo');
 }
 
@@ -287,6 +291,26 @@ async function salvaVolo(evt) {
   const errEl  = document.getElementById('modal-volo-error');
   errEl.style.display = 'none';
   const voloId = document.getElementById('volo-id').value;
+
+  const partenza = document.getElementById('f-partenza').value;
+  const arrivo   = document.getElementById('f-arrivo').value;
+
+  /* Validazione lato client: partenza non nel passato (solo per nuovi voli) */
+  if (!voloId) {
+    const adesso = new Date().toISOString().slice(0, 16);
+    if (partenza < adesso) {
+      errEl.textContent   = 'La data e ora di partenza non può essere nel passato.';
+      errEl.style.display = 'block';
+      return;
+    }
+  }
+
+  /* Validazione lato client: arrivo deve essere successivo alla partenza */
+  if (arrivo && partenza && arrivo <= partenza) {
+    errEl.textContent   = 'La data e ora di arrivo deve essere successiva alla data e ora di partenza.';
+    errEl.style.display = 'block';
+    return;
+  }
 
   const payload = {
     codice_volo:       document.getElementById('f-codice').value.trim().toUpperCase(),
