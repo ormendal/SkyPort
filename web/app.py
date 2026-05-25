@@ -171,7 +171,12 @@ def _calcola_warning_gate(voli):
 
 def _migra_colonne(conn):
     """
-    Aggiunge colonne mancanti alle tabelle esistenti.
+    Safety net per database ripristinati da backup precedenti al consolidamento dello schema.
+
+    Le colonne qui elencate sono ora definite direttamente nei CREATE TABLE di schema.sql
+    e vengono create correttamente su ogni database nuovo. Questa funzione esiste solo per
+    garantire la retrocompatibilità con file .db vecchi ripristinati via /api/admin/restore.
+
     Ogni ALTER TABLE è idempotente: gli errori 'duplicate column' vengono ignorati.
     """
     migrazioni = [
@@ -848,7 +853,7 @@ def prenota():
             return jsonify({"errore": "Hai già una prenotazione attiva su questo volo"}), 409
 
         # Usa il prezzo base del volo, non un valore passato dal client
-        prezzo = float(volo['prezzo_base']) if volo['prezzo_base'] else 100.0
+        prezzo = float(volo['prezzo_base']) if volo['prezzo_base'] is not None else 100.0
         pnr    = _genera_pnr_unico(conn)
         cur    = conn.execute(
             Q.get('insert_prenotazione'),
@@ -1341,7 +1346,7 @@ def compagnia_modifica_volo(id):
         return jsonify({"errore": "posti_totali deve essere un intero positivo"}), 400
 
     try:
-        nuovo_prezzo = float(dati.get('prezzo_base', volo['prezzo_base'] or 100.0))
+        nuovo_prezzo = float(dati.get('prezzo_base', volo['prezzo_base'] if volo['prezzo_base'] is not None else 100.0))
         if nuovo_prezzo < 0:
             raise ValueError
     except (ValueError, TypeError):

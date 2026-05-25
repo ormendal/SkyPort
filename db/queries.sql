@@ -21,7 +21,7 @@ SELECT v.id, v.codice_volo, c.nome AS compagnia,
        v.posti_totali, v.stato, v.prezzo_base,
        v.posti_totali - COALESCE((
            SELECT COUNT(*) FROM prenotazioni p
-           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata')
+           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
        ), 0) AS posti_liberi,
        ao.lat AS orig_lat, ao.lon AS orig_lon, ao.nome AS orig_nome,
        ad.lat AS dest_lat, ad.lon AS dest_lon, ad.nome AS dest_nome
@@ -38,7 +38,7 @@ SELECT v.id, v.codice_volo, c.nome AS compagnia, g.codice AS gate,
        v.posti_totali, v.stato, v.prezzo_base,
        v.posti_totali - COALESCE((
            SELECT COUNT(*) FROM prenotazioni p
-           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata')
+           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
        ), 0) AS posti_liberi,
        ao.lat AS orig_lat, ao.lon AS orig_lon, ao.nome AS orig_nome,
        ad.lat AS dest_lat, ad.lon AS dest_lon, ad.nome AS dest_nome
@@ -89,7 +89,7 @@ VALUES (:username, :password_hash, 'passeggero', :passeggero_id)
 
 -- :posti_occupati_count
 SELECT COUNT(*) FROM prenotazioni
-WHERE volo_id = :volo_id AND stato IN ('prenotata', 'pagata')
+WHERE volo_id = :volo_id AND stato IN ('prenotata', 'pagata', 'imbarcato')
 
 -- :pren_esistente
 SELECT id FROM prenotazioni
@@ -214,7 +214,7 @@ SELECT v.id, v.codice_volo, v.origine, v.destinazione,
        v.gate_id, g.codice AS gate,
        v.posti_totali - COALESCE((
            SELECT COUNT(*) FROM prenotazioni p
-           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata')
+           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
        ), 0) AS posti_liberi
 FROM   voli v
 LEFT JOIN gate g ON v.gate_id = g.id
@@ -233,7 +233,7 @@ VALUES (:codice_volo, :compagnia_id, :gate_id, :origine, :destinazione,
 
 -- :pren_attive_volo
 SELECT COUNT(*) AS n FROM prenotazioni
-WHERE volo_id = :volo_id AND stato IN ('prenotata', 'pagata')
+WHERE volo_id = :volo_id AND stato IN ('prenotata', 'pagata', 'imbarcato')
 
 -- :delete_volo
 DELETE FROM voli WHERE id = :id

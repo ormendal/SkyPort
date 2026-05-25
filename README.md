@@ -224,9 +224,9 @@ python web/app.py
 | POST | `/api/prenota` | Prenota un volo — body: `{volo_id}` |
 | GET | `/api/mie_prenotazioni` | Elenco prenotazioni con stato e carta d'imbarco |
 | POST | `/api/paga/<id>` | Pagamento simulato (scala crediti dal portafoglio) |
-| DELETE | `/api/cancella/<id>` | Cancella prenotazione in stato "prenotata" (penale 10%) |
+| POST | `/api/cancella/<id>` | Cancella prenotazione in stato "prenotata" (penale 10%) |
 | POST | `/api/checkin_online/<id>` | Check-in online: assegna posto e gate automaticamente |
-| POST | `/api/valuta/<id>` | Valuta volo completato — body: `{stelle}` (1–5) |
+| POST | `/api/passeggero/valuta/<id>` | Valuta volo completato — body: `{valutazione}` (1–5) |
 | POST | `/api/passeggero/ricarica` | Ricarica portafoglio — body: `{importo}` |
 | GET | `/api/passeggero/profilo` | Dati profilo passeggero (nome, cognome, documento, crediti) |
 | PUT | `/api/passeggero/profilo` | Aggiorna nome, cognome, documento |
@@ -267,8 +267,6 @@ python web/app.py
 | GET | `/api/admin/log?azione=&utente_id=&data_da=&data_a=&limite=` | Log eventi di sistema con filtri |
 | GET | `/api/admin/utenti` | Elenco utenti con ruolo e stato |
 | PUT | `/api/admin/utenti/<id>` | Modifica stato utente (attivo/bloccato) |
-| GET | `/api/admin/passeggeri` | Elenco passeggeri con crediti e numero prenotazioni |
-| GET | `/api/admin/gate` | Stato di tutti i gate |
 | GET | `/api/admin/notifiche` | Notifiche nuovi utenti e tentativi di login falliti |
 
 ### Trasversale (qualsiasi ruolo autenticato)

@@ -4,6 +4,12 @@
 -- =============================================================================
 -- Solo DDL: le tabelle vengono create qui.
 -- I dati di seed vengono inseriti da web/app.py al primo avvio.
+--
+-- Questo file è la fonte di verità completa dello schema.
+-- Le colonne aggiunte durante lo sviluppo (attivo, prezzo_base, crediti, ecc.)
+-- sono ora integrate direttamente nei CREATE TABLE.
+-- La funzione _migra_colonne() in web/app.py esiste solo come safety net
+-- per i database ripristinati da backup precedenti al consolidamento.
 -- =============================================================================
 
 PRAGMA foreign_keys = ON;
@@ -46,7 +52,10 @@ CREATE TABLE IF NOT EXISTS voli (
     data_ora_arrivo   TEXT    NOT NULL,
     posti_totali      INTEGER NOT NULL CHECK (posti_totali > 0),
     stato             TEXT    NOT NULL DEFAULT 'programmato'
-                              CHECK (stato IN ('programmato', 'partito', 'arrivato'))
+                              CHECK (stato IN ('programmato', 'partito', 'arrivato')),
+    prezzo_base       REAL    NOT NULL DEFAULT 100.0,
+    orario_stimato    TEXT,
+    ritardo_note      TEXT
 );
 
 -- -----------------------------------------------------------------------------
@@ -57,7 +66,8 @@ CREATE TABLE IF NOT EXISTS passeggeri (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     nome      TEXT    NOT NULL,
     cognome   TEXT    NOT NULL,
-    documento TEXT    NOT NULL UNIQUE
+    documento TEXT    NOT NULL UNIQUE,
+    crediti   REAL    NOT NULL DEFAULT 0.0
 );
 
 -- -----------------------------------------------------------------------------
@@ -76,7 +86,8 @@ CREATE TABLE IF NOT EXISTS prenotazioni (
     data_prenotazione   TEXT    NOT NULL DEFAULT (datetime('now')),
     prezzo              REAL    NOT NULL CHECK (prezzo >= 0),
     stato               TEXT    NOT NULL DEFAULT 'prenotata'
-                                CHECK (stato IN ('prenotata', 'pagata', 'cancellata', 'imbarcato'))
+                                CHECK (stato IN ('prenotata', 'pagata', 'cancellata', 'imbarcato')),
+    valutazione         INTEGER CHECK (valutazione BETWEEN 1 AND 5)
 );
 
 -- -----------------------------------------------------------------------------
@@ -92,7 +103,8 @@ CREATE TABLE IF NOT EXISTS utenti (
     compagnia_id  INTEGER REFERENCES compagnie_aeree(id)
                           ON DELETE RESTRICT ON UPDATE RESTRICT,
     passeggero_id INTEGER REFERENCES passeggeri(id)
-                          ON DELETE RESTRICT ON UPDATE RESTRICT
+                          ON DELETE RESTRICT ON UPDATE RESTRICT,
+    attivo        INTEGER NOT NULL DEFAULT 1
 );
 
 -- -----------------------------------------------------------------------------
