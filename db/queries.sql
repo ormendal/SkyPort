@@ -124,10 +124,13 @@ SELECT * FROM prenotazioni WHERE id = :id AND passeggero_id = :passeggero_id
 SELECT crediti FROM passeggeri WHERE id = :id
 
 -- :update_pren_pagata
-UPDATE prenotazioni SET stato = 'pagata' WHERE id = :id
+UPDATE prenotazioni SET stato = 'pagata' WHERE id = :id AND stato = 'prenotata'
 
 -- :update_crediti_scala
 UPDATE passeggeri SET crediti = crediti - :importo WHERE id = :id
+
+-- :update_crediti_paga
+UPDATE passeggeri SET crediti = crediti - :importo WHERE id = :id AND crediti >= :importo
 
 -- :volo_info_ricevuta
 SELECT v.codice_volo, v.origine, v.destinazione, v.data_ora_partenza, c.nome AS compagnia
@@ -139,14 +142,14 @@ WHERE  v.id = :volo_id
 SELECT id FROM carte_imbarco WHERE prenotazione_id = :pren_id
 
 -- :insert_carta_imbarco_online
-INSERT INTO carte_imbarco (prenotazione_id, numero_posto, gate_imbarco_id, operatore_id)
-VALUES (:pren_id, :numero_posto, :gate_id, NULL)
+INSERT INTO carte_imbarco (prenotazione_id, volo_id, numero_posto, gate_imbarco_id, operatore_id)
+VALUES (:pren_id, :volo_id, :numero_posto, :gate_id, NULL)
 
 -- :update_pren_imbarcato
 UPDATE prenotazioni SET stato = 'imbarcato' WHERE id = :id
 
 -- :update_pren_cancellata
-UPDATE prenotazioni SET stato = 'cancellata' WHERE id = :id
+UPDATE prenotazioni SET stato = 'cancellata' WHERE id = :id AND stato = 'prenotata'
 
 -- =============================================================================
 -- Storico, valutazioni, crediti, profilo (passeggero)
@@ -339,8 +342,8 @@ WHERE  p.passeggero_id = :passeggero_id AND p.stato = 'pagata' AND ci.id IS NULL
 ORDER BY v.data_ora_partenza
 
 -- :insert_carta_imbarco_banco
-INSERT INTO carte_imbarco (prenotazione_id, numero_posto, gate_imbarco_id, operatore_id)
-VALUES (:pren_id, :numero_posto, :gate_id, :operatore_id)
+INSERT INTO carte_imbarco (prenotazione_id, volo_id, numero_posto, gate_imbarco_id, operatore_id)
+VALUES (:pren_id, :volo_id, :numero_posto, :gate_id, :operatore_id)
 
 -- :pren_checkin_exec
 SELECT p.*, v.posti_totali, v.gate_id AS volo_gate_id

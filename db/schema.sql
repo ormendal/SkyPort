@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS carte_imbarco (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     prenotazione_id INTEGER NOT NULL UNIQUE REFERENCES prenotazioni(id)
                                             ON DELETE RESTRICT ON UPDATE RESTRICT,
+    volo_id         INTEGER NOT NULL REFERENCES voli(id)
+                                    ON DELETE RESTRICT ON UPDATE RESTRICT,
     numero_posto    TEXT,
     gate_imbarco_id INTEGER REFERENCES gate(id)
                             ON DELETE RESTRICT ON UPDATE RESTRICT,
@@ -123,6 +125,12 @@ CREATE TABLE IF NOT EXISTS carte_imbarco (
     operatore_id    INTEGER REFERENCES utenti(id)
                             ON DELETE RESTRICT ON UPDATE RESTRICT
 );
+
+-- Garantisce che lo stesso posto non venga assegnato a due prenotazioni sullo stesso volo.
+-- Parziale: righe con numero_posto NULL (posto non ancora assegnato) sono escluse.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_posto_volo
+    ON carte_imbarco (volo_id, numero_posto)
+    WHERE numero_posto IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- Tabella: aeroporti

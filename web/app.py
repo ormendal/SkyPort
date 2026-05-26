@@ -180,12 +180,13 @@ def _migra_colonne(conn):
     Ogni ALTER TABLE è idempotente: gli errori 'duplicate column' vengono ignorati.
     """
     migrazioni = [
-        "ALTER TABLE utenti      ADD COLUMN attivo       INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE voli        ADD COLUMN prezzo_base  REAL    NOT NULL DEFAULT 100.0",
-        "ALTER TABLE voli        ADD COLUMN orario_stimato TEXT",
-        "ALTER TABLE voli        ADD COLUMN ritardo_note  TEXT",
+        "ALTER TABLE utenti       ADD COLUMN attivo       INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE voli         ADD COLUMN prezzo_base  REAL    NOT NULL DEFAULT 100.0",
+        "ALTER TABLE voli         ADD COLUMN orario_stimato TEXT",
+        "ALTER TABLE voli         ADD COLUMN ritardo_note  TEXT",
         "ALTER TABLE prenotazioni ADD COLUMN valutazione  INTEGER",
-        "ALTER TABLE passeggeri  ADD COLUMN crediti      REAL    NOT NULL DEFAULT 0.0",
+        "ALTER TABLE passeggeri   ADD COLUMN crediti      REAL    NOT NULL DEFAULT 0.0",
+        "ALTER TABLE carte_imbarco ADD COLUMN volo_id     INTEGER REFERENCES voli(id)",
     ]
     for sql in migrazioni:
         try:
@@ -245,6 +246,17 @@ def _seed_aeroporti(conn):
             ("MAD", "Madrid Barajas",            40.4983, -3.5676),
             ("BER", "Berlino Brandenburg",       52.3667, 13.5033),
             ("BCN", "Barcellona El Prat",        41.2971,  2.0785),
+            ("AMS", "Amsterdam Schiphol",        52.3086,  4.7639),
+            ("MUC", "Monaco Franz Josef Strauss",48.3538, 11.7861),
+            ("ZRH", "Zurigo Kloten",             47.4582,  8.5555),
+            ("VIE", "Vienna Schwechat",          48.1103, 16.5697),
+            ("CPH", "Copenaghen Kastrup",        55.6180, 12.6508),
+            ("GVA", "Ginevra",                   46.2370,  6.1089),
+            ("ORY", "Parigi Orly",               48.7233,  2.3794),
+            # --- Aeroporti intercontinentali ---
+            ("DXB", "Dubai International",       25.2532, 55.3657),
+            ("JFK", "New York Kennedy",          40.6413,-73.7781),
+            ("IST", "Istanbul",                  41.2753, 28.7519),
         ]
     )
     conn.commit()
@@ -262,6 +274,13 @@ def _seed(conn):
         "INSERT INTO compagnie_aeree (nome) VALUES (?)",
         [("Air Dolomiti",), ("Ryanair",), ("ITA Airways",)]
         # id: 1=Air Dolomiti, 2=Ryanair, 3=ITA Airways
+    )
+
+    # ── 1b. Nuove compagnie (Lufthansa, Air France, KLM) ─────────────────────
+    conn.executemany(
+        "INSERT INTO compagnie_aeree (nome) VALUES (?)",
+        [("Lufthansa",), ("Air France",), ("KLM",)]
+        # id: 4=Lufthansa, 5=Air France, 6=KLM
     )
 
     # ── 2. Gate (G1-G6, stati misti) ─────────────────────────────────────────
@@ -334,6 +353,73 @@ def _seed(conn):
             # id=16 — futuro, gate NULL, 180 posti
             ("ITA005", 3, None, "FCO", "MAD",
              "2026-07-01 11:00", "2026-07-01 13:30", 180, "programmato", 145.0, None, None),
+        ]
+    )
+
+    # ── 3b. Nuovi voli (17 voli: 6 arrivato, 2 partito, 9 programmato) ───────
+    # Compagnie: 4=Lufthansa  5=Air France  6=KLM
+    # Gate riusati: 1=G1(LH)  2=G2(AF)  4=G4(KL)
+    conn.executemany(
+        """INSERT INTO voli
+           (codice_volo, compagnia_id, gate_id, origine, destinazione,
+            data_ora_partenza, data_ora_arrivo, posti_totali, stato, prezzo_base,
+            orario_stimato, ritardo_note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            # ── ARRIVATO (passato) ───────────────────────────────────────────
+            # id=17 — 30 gg fa, Lufthansa MXP→MUC
+            ("LH1001", 4, 1, "MXP", "MUC",
+             "2026-04-26 07:00", "2026-04-26 08:45", 180, "arrivato",  180.0, None, None),
+            # id=18 — 15 gg fa, Air France CDG→MXP
+            ("AF2002", 5, 2, "CDG", "MXP",
+             "2026-05-11 08:00", "2026-05-11 10:00", 200, "arrivato",  220.0, None, None),
+            # id=19 — 7 gg fa, KLM AMS→FCO
+            ("KL3003", 6, 4, "AMS", "FCO",
+             "2026-05-19 09:00", "2026-05-19 11:30", 170, "arrivato",  200.0, None, None),
+            # id=20 — 3 gg fa, Lufthansa FCO→BER
+            ("LH1002", 4, 1, "FCO", "BER",
+             "2026-05-23 06:00", "2026-05-23 08:30", 160, "arrivato",  130.0, None, None),
+            # id=21 — ieri, Air France CDG→NAP
+            ("AF2003", 5, 2, "CDG", "NAP",
+             "2026-05-24 07:30", "2026-05-24 09:30", 140, "arrivato",  180.0, None, None),
+            # id=22 — ieri, KLM AMS→VCE
+            ("KL3004", 6, 4, "AMS", "VCE",
+             "2026-05-25 08:00", "2026-05-25 10:15", 150, "arrivato",  165.0, None, None),
+            # ── PARTITO (oggi) ───────────────────────────────────────────────
+            # id=23 — oggi mattina, Lufthansa MXP→MUC
+            ("LH1003", 4, 1, "MXP", "MUC",
+             "2026-05-26 07:00", "2026-05-26 08:45", 120, "partito",   150.0, None, None),
+            # id=24 — oggi, Air France FCO→CDG
+            ("AF2004", 5, 2, "FCO", "CDG",
+             "2026-05-26 09:00", "2026-05-26 11:30", 180, "partito",   195.0, None, None),
+            # ── PROGRAMMATO (futuro) ─────────────────────────────────────────
+            # id=25 — domani, KLM FCO→AMS (prossime 48h, utile per demo)
+            ("KL3005", 6, 4, "FCO", "AMS",
+             "2026-05-27 10:00", "2026-05-27 12:30", 160, "programmato", 185.0, None, None),
+            # id=26 — dopodomani, Lufthansa MXP→MUC (prossime 48h)
+            ("LH1004", 4, 1, "MXP", "MUC",
+             "2026-05-28 14:00", "2026-05-28 15:45", 130, "programmato", 160.0, None, None),
+            # id=27 — 31/05, Air France FCO→CDG
+            ("AF2005", 5, 2, "FCO", "CDG",
+             "2026-05-31 09:00", "2026-05-31 11:00", 180, "programmato", 210.0, None, None),
+            # id=28 — 05/06, Lufthansa FCO→JFK (intercontinentale)
+            ("LH1005", 4, 1, "FCO", "JFK",
+             "2026-06-05 11:00", "2026-06-05 20:00", 280, "programmato", 680.0, None, None),
+            # id=29 — 08/06, KLM AMS→DXB (intercontinentale)
+            ("KL3006", 6, 4, "AMS", "DXB",
+             "2026-06-08 22:00", "2026-06-09 06:00", 310, "programmato", 520.0, None, None),
+            # id=30 — 12/06, Air France MAD→CDG (nazionale EU)
+            ("AF2006", 5, 2, "MAD", "CDG",
+             "2026-06-12 15:00", "2026-06-12 17:30", 160, "programmato", 190.0, None, None),
+            # id=31 — 15/06, Lufthansa BCN→MUC (intra-EU)
+            ("LH1006", 4, 1, "BCN", "MUC",
+             "2026-06-15 08:00", "2026-06-15 10:30", 140, "programmato", 175.0, None, None),
+            # id=32 — 20/06, KLM VCE→AMS (intra-EU)
+            ("KL3007", 6, 4, "VCE", "AMS",
+             "2026-06-20 11:30", "2026-06-20 14:00", 150, "programmato", 195.0, None, None),
+            # id=33 — 25/06, Air France CDG→IST
+            ("AF2007", 5, 2, "CDG", "IST",
+             "2026-06-25 16:00", "2026-06-25 20:30", 200, "programmato", 310.0, None, None),
         ]
     )
 
@@ -433,6 +519,64 @@ def _seed(conn):
         ]
     )
 
+    # ── 5b. Nuove prenotazioni (voli 17–29) ───────────────────────────────────
+    # NOTA: passeggero 1 (mario.rossi / IT00001) riceve solo prenotazioni imbarcato
+    # con carta d'imbarco già emessa, così test_operatore_checkin trova ancora
+    # un'unica prenotazione 'pagata' senza CI (pren 14, volo 5).
+    conn.executemany(
+        """INSERT INTO prenotazioni
+           (passeggero_id, volo_id, codice_prenotazione, data_prenotazione,
+            prezzo, stato, valutazione)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [
+            # --- Volo 17 (LH1001, arrivato 30gg fa — 5 pren per storico) ---
+            ( 1, 17, "LH0001", "2026-04-10 09:00", 180.0, "imbarcato",    5),  # id=44
+            ( 3, 17, "LH0002", "2026-04-10 09:30", 180.0, "imbarcato",    4),  # id=45
+            (11, 17, "LH0003", "2026-04-11 10:00", 180.0, "imbarcato", None),  # id=46
+            (13, 17, "LH0004", "2026-04-11 10:30", 180.0, "imbarcato",    5),  # id=47
+            (15, 17, "LH0005", "2026-04-12 08:00", 180.0, "imbarcato",    3),  # id=48
+            # --- Volo 18 (AF2002, arrivato 15gg fa — 4 pren per storico) ---
+            ( 4, 18, "AF0001", "2026-04-25 08:00", 220.0, "imbarcato", None),  # id=49
+            ( 5, 18, "AF0002", "2026-04-25 08:30", 220.0, "imbarcato",    4),  # id=50
+            ( 6, 18, "AF0003", "2026-04-26 09:00", 220.0, "imbarcato",    5),  # id=51
+            ( 7, 18, "AF0004", "2026-04-26 09:30", 220.0, "imbarcato", None),  # id=52
+            # --- Volo 19 (KL3003, arrivato 7gg fa — 4 pren per storico) ---
+            ( 8, 19, "KL0001", "2026-05-05 08:00", 200.0, "imbarcato",    4),  # id=53
+            ( 9, 19, "KL0002", "2026-05-05 08:30", 200.0, "imbarcato", None),  # id=54
+            (10, 19, "KL0003", "2026-05-06 09:00", 200.0, "imbarcato",    5),  # id=55
+            (12, 19, "KL0004", "2026-05-06 09:30", 200.0, "imbarcato",    3),  # id=56
+            # --- Volo 20 (LH1002, arrivato 3gg fa) ---
+            (14, 20, "LH0006", "2026-05-10 09:00", 130.0, "imbarcato", None),  # id=57
+            (16, 20, "LH0007", "2026-05-10 09:30", 130.0, "imbarcato", None),  # id=58
+            # --- Volo 21 (AF2003, arrivato ieri) ---
+            (17, 21, "AF0005", "2026-05-12 10:00", 180.0, "imbarcato", None),  # id=59
+            (18, 21, "AF0006", "2026-05-12 10:30", 180.0, "imbarcato",    4),  # id=60
+            # --- Volo 22 (KL3004, arrivato ieri) ---
+            (19, 22, "KL0005", "2026-05-14 09:00", 165.0, "imbarcato", None),  # id=61
+            (20, 22, "KL0006", "2026-05-14 09:30", 165.0, "imbarcato",    5),  # id=62
+            # --- Volo 23 (LH1003, partito oggi) ---
+            (11, 23, "LH0008", "2026-05-22 11:00", 150.0, "pagata",    None),  # id=63
+            ( 3, 23, "LH0009", "2026-05-22 11:30", 150.0, "imbarcato", None),  # id=64  → carta
+            # --- Volo 24 (AF2004, partito oggi) ---
+            (13, 24, "AF0007", "2026-05-22 12:00", 195.0, "pagata",    None),  # id=65
+            (15, 24, "AF0008", "2026-05-22 12:30", 195.0, "imbarcato", None),  # id=66  → carta
+            # --- Volo 25 (KL3005, domani — utile per demo prenotazione→check-in) ---
+            (20, 25, "KL0007", "2026-05-24 09:00", 185.0, "pagata",    None),  # id=67
+            (18, 25, "KL0008", "2026-05-24 09:30", 185.0, "prenotata", None),  # id=68
+            # --- Volo 26 (LH1004, dopodomani) ---
+            (13, 26, "LH0010", "2026-05-24 10:00", 160.0, "pagata",    None),  # id=69
+            (16, 26, "LH0011", "2026-05-24 10:30", 160.0, "prenotata", None),  # id=70
+            # --- Volo 27 (AF2005, 31/05) ---
+            (18, 27, "AF0009", "2026-05-25 11:00", 210.0, "prenotata", None),  # id=71
+            # --- Volo 28 (LH1005 FCO→JFK, intercontinentale, prezzo alto) ---
+            (13, 28, "LH0012", "2026-05-25 12:00", 680.0, "pagata",    None),  # id=72
+            (20, 28, "LH0013", "2026-05-25 12:30", 680.0, "prenotata", None),  # id=73
+            # --- Volo 29 (KL3006 AMS→DXB, intercontinentale) ---
+            (11, 29, "KL0009", "2026-05-25 13:00", 520.0, "prenotata", None),  # id=74
+            (18, 29, "KL0010", "2026-05-25 13:30", 520.0, "cancellata",None),  # id=75
+        ]
+    )
+
     # ── 6. Utenti (1 admin, 3 compagnie, 2 operatori, 20 passeggeri) ─────────
     # id: 1=admin, 2=cmp_airdolomiti, 3=cmp_ryanair, 4=cmp_ita,
     #     5=operatore1, 6=operatore2, 7-26=passeggeri 1-20
@@ -474,30 +618,81 @@ def _seed(conn):
         ]
     )
 
+    # ── 6b. Utenti per le nuove compagnie ────────────────────────────────────
+    conn.executemany(
+        """INSERT INTO utenti
+           (username, password_hash, ruolo, compagnia_id, passeggero_id, attivo)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [
+            ("compagnia4", ph, "compagnia", 4, None, 1),  # id=27 Lufthansa
+            ("compagnia5", ph, "compagnia", 5, None, 1),  # id=28 Air France
+            ("compagnia6", ph, "compagnia", 6, None, 1),  # id=29 KLM
+        ]
+    )
+
     # ── 7. Carte d'imbarco (11 carte: 5 online, 6 al banco) ──────────────────
     # operatore_id 5=operatore1, 6=operatore2; NULL=check-in online
     conn.executemany(
         """INSERT INTO carte_imbarco
-           (prenotazione_id, numero_posto, gate_imbarco_id, data_emissione, operatore_id)
-           VALUES (?, ?, ?, ?, ?)""",
+           (prenotazione_id, volo_id, numero_posto, gate_imbarco_id, data_emissione, operatore_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
         [
             # Volo 1 (EN1234, gate G1=id 1)
-            ( 3, "10A",  1, "2026-05-31 18:00", None),  # online
+            ( 3,  1, "10A",  1, "2026-05-31 18:00", None),  # online
             # Volo 2 (EN5678, gate G2=id 2)
-            ( 5,  "5B",  2, "2026-05-20 07:00",    5),  # banco — operatore1
+            ( 5,  2,  "5B",  2, "2026-05-20 07:00",    5),  # banco — operatore1
             # Volo 4 (FR3456, gate G2=id 2)
-            (11,  "1C",  2, "2026-05-17 20:00",    5),  # banco — operatore1
-            (12,  "2A",  2, "2026-05-17 20:30", None),  # online
-            (13,  "3B",  2, "2026-05-17 21:00",    5),  # banco — operatore1
+            (11,  4,  "1C",  2, "2026-05-17 20:00",    5),  # banco — operatore1
+            (12,  4,  "2A",  2, "2026-05-17 20:30", None),  # online
+            (13,  4,  "3B",  2, "2026-05-17 21:00",    5),  # banco — operatore1
             # Volo 7 (ITA002, gate G1=id 1)
-            (21, "14C",  1, "2026-04-14 20:00", None),  # online
-            (22, "15A",  1, "2026-04-14 20:30",    6),  # banco — operatore2
+            (21,  7, "14C",  1, "2026-04-14 20:00", None),  # online
+            (22,  7, "15A",  1, "2026-04-14 20:30",    6),  # banco — operatore2
             # Volo 10 (ITA003, gate G1=id 1)
-            (28,  "7D",  1, "2026-04-19 19:00", None),  # online
-            (29,  "8F",  1, "2026-04-19 19:30",    6),  # banco — operatore2
+            (28, 10,  "7D",  1, "2026-04-19 19:00", None),  # online
+            (29, 10,  "8F",  1, "2026-04-19 19:30",    6),  # banco — operatore2
             # Volo 13 (ITA004, gate G4=id 4)
-            (34,  "3C",  4, "2026-05-01 22:00", None),  # online
-            (35,  "4A",  4, "2026-05-01 22:30",    5),  # banco — operatore1
+            (34, 13,  "3C",  4, "2026-05-01 22:00", None),  # online
+            (35, 13,  "4A",  4, "2026-05-01 22:30",    5),  # banco — operatore1
+        ]
+    )
+
+    # ── 7b. Carte d'imbarco per i nuovi voli ─────────────────────────────────
+    # posti univoci per volo (rispetta l'indice uq_posto_volo)
+    conn.executemany(
+        """INSERT INTO carte_imbarco
+           (prenotazione_id, volo_id, numero_posto, gate_imbarco_id, data_emissione, operatore_id)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [
+            # Volo 17 (LH1001, G1=id 1) — 5 passeggeri imbarcati
+            (44, 17, "1A", 1, "2026-04-26 05:30", None),   # online
+            (45, 17, "1B", 1, "2026-04-26 05:30",    5),   # banco — operatore1
+            (46, 17, "1C", 1, "2026-04-26 05:45", None),   # online
+            (47, 17, "1D", 1, "2026-04-26 05:45",    5),   # banco — operatore1
+            (48, 17, "2A", 1, "2026-04-26 06:00", None),   # online
+            # Volo 18 (AF2002, G2=id 2) — 4 passeggeri
+            (49, 18, "1A", 2, "2026-05-11 06:00", None),   # online
+            (50, 18, "1B", 2, "2026-05-11 06:00",    5),   # banco — operatore1
+            (51, 18, "1C", 2, "2026-05-11 06:15", None),   # online
+            (52, 18, "1D", 2, "2026-05-11 06:15",    6),   # banco — operatore2
+            # Volo 19 (KL3003, G4=id 4) — 4 passeggeri
+            (53, 19, "1A", 4, "2026-05-19 07:00", None),   # online
+            (54, 19, "1B", 4, "2026-05-19 07:00",    5),   # banco — operatore1
+            (55, 19, "1C", 4, "2026-05-19 07:15", None),   # online
+            (56, 19, "1D", 4, "2026-05-19 07:15",    6),   # banco — operatore2
+            # Volo 20 (LH1002, G1=id 1) — 2 passeggeri
+            (57, 20, "1A", 1, "2026-05-23 04:30", None),   # online
+            (58, 20, "1B", 1, "2026-05-23 04:30",    5),   # banco — operatore1
+            # Volo 21 (AF2003, G2=id 2) — 2 passeggeri
+            (59, 21, "1A", 2, "2026-05-24 05:45", None),   # online
+            (60, 21, "1B", 2, "2026-05-24 05:45",    6),   # banco — operatore2
+            # Volo 22 (KL3004, G4=id 4) — 2 passeggeri
+            (61, 22, "1A", 4, "2026-05-25 06:00", None),   # online
+            (62, 22, "1B", 4, "2026-05-25 06:00",    5),   # banco — operatore1
+            # Volo 23 (LH1003, G1=id 1) — solo pren 64 è imbarcato
+            (64, 23, "1A", 1, "2026-05-26 05:30",    5),   # banco — operatore1
+            # Volo 24 (AF2004, G2=id 2) — solo pren 66 è imbarcato
+            (66, 24, "1A", 2, "2026-05-26 07:00",    6),   # banco — operatore2
         ]
     )
 
@@ -897,6 +1092,7 @@ def paga(prenotazione_id):
     """
     passeggero_id = session['passeggero_id']
 
+    # Lettura iniziale per rispondere 404/400 prima di aprire la transazione.
     pren = query_row(
         Q.get('pren_by_id_passeggero'), {'id': prenotazione_id, 'passeggero_id': passeggero_id}
     )
@@ -905,22 +1101,43 @@ def paga(prenotazione_id):
     if pren['stato'] != 'prenotata':
         return jsonify({"errore": f"La prenotazione è in stato '{pren['stato']}' e non può essere pagata"}), 400
 
-    passeggero = query_row(Q.get('crediti_passeggero'), {'id': passeggero_id})
-    crediti    = float(passeggero['crediti']) if passeggero else 0.0
-    prezzo     = float(pren['prezzo'])
-
-    if crediti < prezzo:
-        return jsonify({
-            "errore":               "Crediti insufficienti. Ricarica il tuo portafoglio.",
-            "crediti_disponibili":  crediti,
-            "prezzo":               prezzo,
-        }), 400
+    prezzo = float(pren['prezzo'])
 
     conn = get_db()
     try:
         conn.execute("BEGIN")
-        conn.execute(Q.get('update_pren_pagata'), {'id': prenotazione_id})
-        conn.execute(Q.get('update_crediti_scala'), {'importo': prezzo, 'id': passeggero_id})
+
+        # Rileggi i crediti dentro la transazione per eliminare la TOCTOU race.
+        pas     = conn.execute(Q.get('crediti_passeggero'), {'id': passeggero_id}).fetchone()
+        crediti = float(pas['crediti']) if pas else 0.0
+
+        if crediti < prezzo:
+            conn.rollback()
+            return jsonify({
+                "errore":               "Crediti insufficienti. Ricarica il tuo portafoglio.",
+                "crediti_disponibili":  crediti,
+                "prezzo":               prezzo,
+            }), 400
+
+        # WHERE stato = 'prenotata' garantisce che rowcount == 0 se un thread concorrente
+        # ha già modificato la prenotazione tra la lettura iniziale e questo UPDATE.
+        cur = conn.execute(Q.get('update_pren_pagata'), {'id': prenotazione_id})
+        if cur.rowcount != 1:
+            conn.rollback()
+            return jsonify({"errore": "Prenotazione non più disponibile per il pagamento"}), 409
+
+        # WHERE crediti >= :importo è la guardia atomica finale: rowcount == 0 se nel
+        # frattempo un altro thread ha già scalato i crediti portandoli sotto soglia.
+        cur = conn.execute(Q.get('update_crediti_paga'), {'importo': prezzo, 'id': passeggero_id})
+        if cur.rowcount != 1:
+            conn.rollback()
+            return jsonify({
+                "errore":               "Crediti insufficienti. Ricarica il tuo portafoglio.",
+                "crediti_disponibili":  crediti,
+                "prezzo":               prezzo,
+            }), 400
+
+        nuovi_crediti = crediti - prezzo
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -931,8 +1148,6 @@ def paga(prenotazione_id):
     registra_log('pagamento', session['utente_id'],
                  {'prenotazione_id': prenotazione_id, 'importo': prezzo})
 
-    nuovi = query_row(Q.get('crediti_passeggero'), {'id': passeggero_id})
-
     # Recupera info volo per la ricevuta
     volo_info = query_row(Q.get('volo_info_ricevuta'), {'volo_id': pren['volo_id']})
     # ID transazione basato su prenotazione_id + timestamp ridotto
@@ -942,7 +1157,7 @@ def paga(prenotazione_id):
     return jsonify({
         "messaggio":         "Pagamento completato",
         "nuovo_stato":       "pagata",
-        "crediti_rimanenti": float(nuovi['crediti']),
+        "crediti_rimanenti": nuovi_crediti,
         "ricevuta": {
             "transazione_id":      transazione_id,
             "codice_prenotazione": pren['codice_prenotazione'],
@@ -1000,7 +1215,7 @@ def checkin_online(prenotazione_id):
 
         cur = conn.execute(
             Q.get('insert_carta_imbarco_online'),
-            {'pren_id': prenotazione_id, 'numero_posto': posto, 'gate_id': volo['gate_id']}
+            {'pren_id': prenotazione_id, 'volo_id': pren['volo_id'], 'numero_posto': posto, 'gate_id': volo['gate_id']}
         )
         carta_id = cur.lastrowid
         conn.execute(Q.get('update_pren_imbarcato'), {'id': prenotazione_id})
@@ -1048,7 +1263,12 @@ def cancella_prenotazione(prenotazione_id):
     conn = get_db()
     try:
         conn.execute("BEGIN")
-        conn.execute(Q.get('update_pren_cancellata'), {'id': prenotazione_id})
+        # WHERE stato = 'prenotata' impedisce che due richieste concorrenti applichino
+        # entrambe la penale: la seconda troverà rowcount == 0 e farà ROLLBACK.
+        cur = conn.execute(Q.get('update_pren_cancellata'), {'id': prenotazione_id})
+        if cur.rowcount != 1:
+            conn.rollback()
+            return jsonify({"errore": "prenotazione non più cancellabile"}), 409
         conn.execute(Q.get('update_crediti_scala'), {'importo': penale, 'id': passeggero_id})
         conn.commit()
     except Exception as e:
@@ -1517,7 +1737,8 @@ def operatore_checkin():
             numero_posto = _genera_posto(conn, pren['volo_id'], pren['posti_totali'])
             cur = conn.execute(
                 Q.get('insert_carta_imbarco_banco'),
-                {'pren_id': pren['id'], 'numero_posto': numero_posto, 'gate_id': pren['gate_id'], 'operatore_id': operatore_id}
+                {'pren_id': pren['id'], 'volo_id': pren['volo_id'],
+                 'numero_posto': numero_posto, 'gate_id': pren['gate_id'], 'operatore_id': operatore_id}
             )
             carta_id = cur.lastrowid
             conn.execute(Q.get('update_pren_imbarcato'), {'id': pren['id']})
@@ -1573,9 +1794,19 @@ def operatore_checkin_exec():
         conn.execute("BEGIN")
         if not numero_posto:
             numero_posto = _genera_posto(conn, pren['volo_id'], pren['posti_totali'])
+        else:
+            # Verifica che il posto esplicito non sia già occupato (stesso controllo di checkin_online).
+            # Il controllo è dentro la stessa transazione per evitare la race tra check e INSERT.
+            occupati = {r[0] for r in conn.execute(
+                Q.get('posti_occupati_carta'), {'volo_id': pren['volo_id']}
+            ).fetchall()}
+            if numero_posto in occupati:
+                conn.rollback()
+                return jsonify({"errore": "posto già occupato"}), 409
         cur = conn.execute(
             Q.get('insert_carta_imbarco_banco'),
-            {'pren_id': prenotazione_id, 'numero_posto': numero_posto, 'gate_id': gate_id, 'operatore_id': operatore_id}
+            {'pren_id': prenotazione_id, 'volo_id': pren['volo_id'],
+             'numero_posto': numero_posto, 'gate_id': gate_id, 'operatore_id': operatore_id}
         )
         carta_id = cur.lastrowid
         conn.execute(Q.get('update_pren_imbarcato'), {'id': prenotazione_id})
