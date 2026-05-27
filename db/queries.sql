@@ -215,10 +215,18 @@ SELECT v.id, v.codice_volo, v.origine, v.destinazione,
        v.posti_totali, v.stato, v.prezzo_base,
        v.orario_stimato, v.ritardo_note,
        v.gate_id, g.codice AS gate,
+       COALESCE((
+           SELECT COUNT(*) FROM prenotazioni p
+           WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
+       ), 0) AS posti_occupati,
        v.posti_totali - COALESCE((
            SELECT COUNT(*) FROM prenotazioni p
            WHERE p.volo_id = v.id AND p.stato IN ('prenotata', 'pagata', 'imbarcato')
-       ), 0) AS posti_liberi
+       ), 0) AS posti_liberi,
+       (SELECT ROUND(AVG(p2.valutazione), 1) FROM prenotazioni p2
+        WHERE p2.volo_id = v.id AND p2.valutazione IS NOT NULL) AS valutazione_media,
+       (SELECT COUNT(*) FROM prenotazioni p3
+        WHERE p3.volo_id = v.id AND p3.valutazione IS NOT NULL) AS valutazione_count
 FROM   voli v
 LEFT JOIN gate g ON v.gate_id = g.id
 WHERE  v.compagnia_id = :compagnia_id

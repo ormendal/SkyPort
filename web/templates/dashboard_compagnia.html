@@ -15,28 +15,90 @@
     </button>
   </div>
 
-  <div class="app-table-wrap">
-    <table class="app-table" id="voli-table" aria-label="I tuoi voli">
-      <thead>
-        <tr>
-          <th scope="col">Codice</th>
-          <th scope="col">Tratta</th>
-          <th scope="col">Partenza</th>
-          <th scope="col">Arrivo</th>
-          <th scope="col">Gate</th>
-          <th scope="col">Prezzo</th>
-          <th scope="col">Posti tot.</th>
-          <th scope="col">Liberi</th>
-          <th scope="col">Stato</th>
-          <th scope="col"><span class="visually-hidden">Azioni</span></th>
-        </tr>
-      </thead>
-      <tbody id="voli-body">
-        <tr><td colspan="9" style="padding:32px;text-align:center;">
-          <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
-        </td></tr>
-      </tbody>
-    </table>
+  <!-- Tab navigation: voli operativi (default) vs storico -->
+  <ul class="nav nav-tabs" id="voli-tabs" role="tablist" style="margin-bottom:var(--sp-4);">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-operativi-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-operativi" type="button" role="tab"
+              aria-controls="tab-operativi" aria-selected="true">
+        <i class="bi bi-airplane-engines" aria-hidden="true"></i>
+        Voli operativi
+        <span class="badge bg-primary" id="badge-operativi">0</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-storici-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-storici" type="button" role="tab"
+              aria-controls="tab-storici" aria-selected="false">
+        <i class="bi bi-clock-history" aria-hidden="true"></i>
+        Storico voli
+        <span class="badge bg-secondary" id="badge-storici">0</span>
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="voli-tab-content">
+
+    <!-- ========== TAB 1: VOLI OPERATIVI ========== -->
+    <div class="tab-pane fade show active" id="tab-operativi" role="tabpanel"
+         aria-labelledby="tab-operativi-btn">
+      <p class="text-muted text-sm" id="summary-operativi" style="margin-bottom:var(--sp-3);">
+        <span class="skeleton" style="width:200px;height:14px;">&nbsp;</span>
+      </p>
+      <div class="app-table-wrap">
+        <table class="app-table" id="voli-operativi-table" aria-label="Voli operativi">
+          <thead>
+            <tr>
+              <th scope="col">Codice</th>
+              <th scope="col">Tratta</th>
+              <th scope="col">Partenza</th>
+              <th scope="col">Arrivo</th>
+              <th scope="col">Gate</th>
+              <th scope="col">Prezzo</th>
+              <th scope="col">Posti tot.</th>
+              <th scope="col">Liberi</th>
+              <th scope="col">Stato</th>
+              <th scope="col"><span class="visually-hidden">Azioni</span></th>
+            </tr>
+          </thead>
+          <tbody id="voli-operativi-body">
+            <tr><td colspan="10" style="padding:32px;text-align:center;">
+              <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== TAB 2: STORICO VOLI (read-only) ========== -->
+    <div class="tab-pane fade" id="tab-storici" role="tabpanel"
+         aria-labelledby="tab-storici-btn">
+      <p class="text-muted text-sm" id="summary-storici" style="margin-bottom:var(--sp-3);">
+        <span class="skeleton" style="width:200px;height:14px;">&nbsp;</span>
+      </p>
+      <div class="app-table-wrap">
+        <table class="app-table" id="voli-storici-table" aria-label="Storico voli conclusi">
+          <thead>
+            <tr>
+              <th scope="col">Codice</th>
+              <th scope="col">Tratta</th>
+              <th scope="col">Partenza</th>
+              <th scope="col">Gate</th>
+              <th scope="col">Posti occ. / tot.</th>
+              <th scope="col">Valutazione</th>
+              <th scope="col">Stato</th>
+              <th scope="col"><span class="visually-hidden">Azioni</span></th>
+            </tr>
+          </thead>
+          <tbody id="voli-storici-body">
+            <tr><td colspan="8" style="padding:32px;text-align:center;">
+              <span class="skeleton" style="width:240px;height:16px;">&nbsp;</span>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -241,6 +303,12 @@ function fmtDt(iso) {
          ' ' + d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
 }
 
+function fmtData(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'numeric' });
+}
+
 function isoToLocal(iso) {
   if (!iso) return '';
   return iso.replace(' ', 'T').substring(0, 16);
@@ -343,7 +411,7 @@ async function salvaVolo(evt) {
   }
 }
 
-/* ─── Eliminazione volo ─── */
+/* ─── Eliminazione volo (solo voli operativi) ─── */
 let _voloIdDaEliminare = null;
 
 function apriElimina(v) {
@@ -371,9 +439,6 @@ async function confermEliminazione() {
     showToast(data.messaggio || 'Volo eliminato.');
     closeModal('modal-elimina');
     _voloIdDaEliminare = null;
-    /* Animazione fade-out della riga eliminata */
-    const riga = document.querySelector(`tr[data-volo-id="${_voloIdDaEliminare}"]`);
-    if (riga) riga.classList.add('row-deleting');
     setTimeout(caricaVoli, 250);
   } else {
     errEl.textContent = data.errore || 'Errore durante l\'eliminazione.';
@@ -381,12 +446,19 @@ async function confermEliminazione() {
   }
 }
 
-/* ─── Render e caricamento ─── */
-function renderVoli(lista) {
-  const tbody = document.getElementById('voli-body');
+/* ─── Render: Voli operativi (programmato + partito) ─── */
+function renderOperativi(lista) {
+  const tbody = document.getElementById('voli-operativi-body');
+  const summary = document.getElementById('summary-operativi');
+
+  document.getElementById('badge-operativi').textContent = lista.length;
+  summary.innerHTML = lista.length === 0
+    ? 'Nessun volo operativo al momento.'
+    : `<strong>${lista.length}</strong> volo/i in stato programmato o partito.`;
+
   if (lista.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--c-muted);">
-      Nessun volo registrato.
+      Nessun volo operativo al momento.
       <button class="btn-action" style="margin-left:8px;" onclick="apriNuovoVolo()">Crea il primo</button>
     </td></tr>`;
     return;
@@ -449,10 +521,65 @@ function renderVoli(lista) {
   }).join('');
 }
 
+/* ─── Render: Storico voli (arrivato, sola lettura) ─── */
+function renderStorici(lista) {
+  const tbody = document.getElementById('voli-storici-body');
+  const summary = document.getElementById('summary-storici');
+
+  document.getElementById('badge-storici').textContent = lista.length;
+  summary.innerHTML = lista.length === 0
+    ? 'Nessun volo concluso da mostrare.'
+    : `<strong>${lista.length}</strong> volo/i conclusi (sola lettura).`;
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--c-muted);">
+      Nessun volo concluso da mostrare.
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = lista.map(v => {
+    /* Valutazione media + numero voti */
+    const valutazioneCell = (v.valutazione_media != null)
+      ? `<span title="${v.valutazione_count} valutazione/i">
+           <i class="bi bi-star-fill" style="color:var(--c-gold);"></i>
+           <strong>${Number(v.valutazione_media).toFixed(1)}</strong>
+           <span class="text-muted text-sm">(${v.valutazione_count})</span>
+         </span>`
+      : '<span class="text-muted text-sm">—</span>';
+
+    const postiOcc = v.posti_occupati ?? (v.posti_totali - (v.posti_liberi ?? 0));
+    const occupazione = `${postiOcc} / ${v.posti_totali}`;
+
+    return `<tr data-volo-id="${v.id}">
+      <td><span class="codice-volo">${v.codice_volo}</span></td>
+      <td><strong>${v.origine}</strong> → <strong>${v.destinazione}</strong></td>
+      <td style="white-space:nowrap;">${fmtData(v.data_ora_partenza)}</td>
+      <td>${v.gate || '—'}</td>
+      <td>${occupazione}</td>
+      <td>${valutazioneCell}</td>
+      <td><span class="badge-stato badge-arrivato">arrivato</span></td>
+      <td>
+        <button class="btn-action" style="font-size:12px;"
+                onclick='apriPasseggeri(${v.id}, "${v.codice_volo}")'>
+          <i class="bi bi-people" aria-hidden="true"></i> Passeggeri
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
 async function caricaVoli() {
   const { ok, data } = await apiFetch('/api/compagnia/voli');
-  if (ok) renderVoli(data);
-  else showToast('Errore nel caricamento dei voli.', 'error');
+  if (!ok) {
+    showToast('Errore nel caricamento dei voli.', 'error');
+    return;
+  }
+  /* Backward-compat: se per qualche motivo l'endpoint torna ancora una lista flat */
+  const operativi = Array.isArray(data) ? data.filter(v => v.stato !== 'arrivato') : (data.operativi || []);
+  const storici   = Array.isArray(data) ? data.filter(v => v.stato === 'arrivato') : (data.storici   || []);
+  renderOperativi(operativi);
+  renderStorici(storici);
 }
 
 /* ─── Modal: Lista passeggeri del volo ─── */
@@ -478,7 +605,7 @@ async function apriPasseggeri(voloId, codiceVolo) {
     <td>${p.nome} ${p.cognome}</td>
     <td><span class="codice-volo" style="font-size:12px;">${p.documento}</span></td>
     <td><span class="codice-volo" style="font-size:12px;">${p.codice_prenotazione}</span></td>
-    <td><span class="badge-stato badge-${p.stato}">${p.stato}</span></td>
+    <td><span class="badge-stato badge-${p.stato_prenotazione || p.stato}">${p.stato_prenotazione || p.stato}</span></td>
   </tr>`).join('');
 }
 

@@ -19,6 +19,9 @@ aeroporto/
 ├── db/
 │   ├── __init__.py
 │   ├── schema.sql          # DDL: definizione delle 9 tabelle SQLite
+│   ├── seed.sql            # Popolamento iniziale del database con dati statici
+│   │                       # (aeroporti, compagnie, gate, passeggeri, voli,
+│   │                       #  prenotazioni, carte d'imbarco)
 │   ├── queries.sql         # Tutte le query SQL esternalizzate (Jinja2)
 │   └── query_loader.py     # Loader: parsing queries.sql + rendering Jinja2
 └── web/
@@ -113,9 +116,32 @@ pytest tests/
 I test usano un database SQLite temporaneo e isolato per ogni caso di test (`tmp_path` di pytest), senza toccare il database di produzione.
 
 Il database SQLite viene creato automaticamente in `data/aeroporto.db`
-al primo avvio con dati di esempio precaricati (3 compagnie, 6 gate,
-16 voli, 20 passeggeri, 43 prenotazioni, 11 carte d'imbarco, 12 aeroporti).
+al primo avvio con dati di esempio precaricati (6 compagnie, 12 gate,
+18 voli, 25 passeggeri, 14 prenotazioni, 5 carte d'imbarco, 22 aeroporti).
 I dati crescono ad ogni utilizzo dell'interfaccia.
+
+### Come ripopolare il database
+
+Il seed è diviso in due fasi orchestrate da `init_db()` in `web/app.py`:
+
+1. **Fase statica** — `_seed_statico()` esegue lo script `db/seed.sql` via
+   `conn.executescript()`. Contiene tutti gli `INSERT OR IGNORE` per
+   aeroporti, compagnie, gate, passeggeri, voli, prenotazioni e carte
+   d'imbarco. Per modificare i dati iniziali, editare `db/seed.sql`.
+2. **Fase dinamica** — `_seed_dinamico()` inserisce gli utenti con password
+   hashate via `werkzeug.security.generate_password_hash` (il salt è random
+   ad ogni invocazione e quindi non è pre-calcolabile in SQL puro).
+
+Entrambe le fasi sono idempotenti (INSERT OR IGNORE) e vengono eseguite solo
+se il database è vuoto (guardia su `compagnie_aeree`). Per forzare un seed
+fresco: `rm data/aeroporto.db` e riavviare l'app.
+
+Il seed è time-locked: tutte le date dei voli sono statiche relative al
+**28 maggio 2026** (giorno della demo). Il volo `id=1` (EN1234, ore 14:00)
+è il **volo demo**: gate G1 assegnato, prezzo €120, 150 posti, nessuna
+prenotazione esistente per il passeggero demo. Il passeggero `id=1` (Mario
+Rossi, documento `AY1234567`, 500 crediti) è il **passeggero demo**, senza
+prenotazioni preesistenti.
 
 ### In locale (senza Docker)
 
@@ -134,31 +160,11 @@ python web/app.py
 | Username | Password | Ruolo | Note |
 |----------|----------|-------|------|
 | `admin` | `password` | admin | Statistiche, storico voli, aeroporti |
-| `compagnia1` | `password` | compagnia | Air Dolomiti |
-| `compagnia2` | `password` | compagnia | Ryanair |
-| `compagnia3` | `password` | compagnia | ITA Airways |
 | `operatore1` | `password` | operatore | Check-in al banco |
-| `operatore2` | `password` | operatore | Check-in al banco |
-| `mario.rossi` | `password` | passeggero | Mario Rossi — crediti €500 |
-| `laura.bianchi` | `password` | passeggero | **Account bloccato** (test admin) — crediti €200 |
-| `giuseppe.verdi` | `password` | passeggero | Giuseppe Verdi — crediti €150 |
-| `anna.ferrari` | `password` | passeggero | Anna Ferrari — crediti €0 |
-| `luca.romano` | `password` | passeggero | Luca Romano — crediti €0 |
-| `sofia.esposito` | `password` | passeggero | Sofia Esposito — crediti €0 |
-| `marco.conti` | `password` | passeggero | Marco Conti — crediti €0 |
-| `elena.ricci` | `password` | passeggero | Elena Ricci — crediti €0 |
-| `paolo.lombardi` | `password` | passeggero | Paolo Lombardi — crediti €0 |
-| `giulia.mancini` | `password` | passeggero | Giulia Mancini — crediti €0 |
-| `francesco.bruno` | `password` | passeggero | Francesco Bruno — crediti €300 |
-| `chiara.deluca` | `password` | passeggero | Chiara De Luca — crediti €50 |
-| `roberto.galli` | `password` | passeggero | Roberto Galli — crediti €1000 |
-| `valentina.marini` | `password` | passeggero | Valentina Marini — crediti €0 |
-| `andrea.moretti` | `password` | passeggero | Andrea Moretti — crediti €180 |
-| `serena.costa` | `password` | passeggero | Serena Costa — crediti €75 |
-| `matteo.ferretti` | `password` | passeggero | Matteo Ferretti — crediti €0 |
-| `alessia.pellegrini` | `password` | passeggero | Alessia Pellegrini — crediti €250 |
-| `davide.caruso` | `password` | passeggero | Davide Caruso — crediti €0 |
-| `monica.santoro` | `password` | passeggero | Monica Santoro — crediti €400 |
+| `compagnia1` | `password` | compagnia | Air Dolomiti (6 voli) |
+| `compagnia2` | `password` | compagnia | ITA Airways (6 voli) |
+| `mario.rossi` | `demo1234` | passeggero | **Passeggero DEMO** — Mario Rossi, documento `AY1234567`, crediti €500, nessuna prenotazione preesistente |
+| `roberto.galli` | `password` | passeggero | Roberto Galli — documento `IT00013`, crediti €1000, ha prenotazioni in vari stati |
 
 ---
 
@@ -292,10 +298,10 @@ curl http://localhost:5000/api/voli/attivi
 # Elenco aeroporti
 curl http://localhost:5000/api/aeroporti
 
-# Login come passeggero
+# Login come passeggero demo
 curl -c cookie.txt -X POST http://localhost:5000/api/login \
      -H "Content-Type: application/json" \
-     -d '{"username":"mario.rossi","password":"password"}'
+     -d '{"username":"mario.rossi","password":"demo1234"}'
 
 # Prenotazioni del passeggero
 curl -b cookie.txt http://localhost:5000/api/mie_prenotazioni
@@ -303,7 +309,7 @@ curl -b cookie.txt http://localhost:5000/api/mie_prenotazioni
 # Modifica profilo
 curl -b cookie.txt -X PUT http://localhost:5000/api/passeggero/profilo \
      -H "Content-Type: application/json" \
-     -d '{"nome":"Mario","cognome":"Rossi","documento":"IT00001"}'
+     -d '{"nome":"Mario","cognome":"Rossi","documento":"AY1234567"}'
 
 # Login come admin e statistiche
 curl -c cookie.txt -X POST http://localhost:5000/api/login \

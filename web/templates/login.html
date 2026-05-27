@@ -33,7 +33,7 @@
         <div class="login-divider">Credenziali demo</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2);">
           <button class="btn-action" style="justify-content:center;font-size:12px;"
-                  onclick="fillLogin('mario.rossi')">mario.rossi</button>
+                  onclick="fillLogin('mario.rossi', 'demo1234')">mario.rossi</button>
           <button class="btn-action" style="justify-content:center;font-size:12px;"
                   onclick="fillLogin('roberto.galli')">roberto.galli</button>
           <button class="btn-action" style="justify-content:center;font-size:12px;"
@@ -101,9 +101,9 @@
 
 {% block scripts %}
 <script>
-function fillLogin(user) {
+function fillLogin(user, pwd) {
   document.getElementById('login-username').value = user;
-  document.getElementById('login-password').value = 'password';
+  document.getElementById('login-password').value = pwd || 'password';
 }
 
 /* Mostra/nascondi suggerimento lunghezza password in tempo reale */

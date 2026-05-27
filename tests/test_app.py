@@ -148,24 +148,30 @@ def test_overbooking(client):
                    '2027-06-01 10:00', '2027-06-01 11:00', 2, 'programmato', 50.0)"""
     )
     volo_id = cur.lastrowid
-    print(f"  Creato volo OB9999 con id={volo_id} e 2 posti")
-    # Occupa entrambi i posti con prenotazioni di passeggeri senza account utente
-    conn.execute(
-        "INSERT INTO prenotazioni (passeggero_id, volo_id, codice_prenotazione, prezzo, stato)"
-        " VALUES (4, ?, 'OB0001', 50.0, 'prenotata')",
-        (volo_id,)
-    )
-    conn.execute(
-        "INSERT INTO prenotazioni (passeggero_id, volo_id, codice_prenotazione, prezzo, stato)"
-        " VALUES (5, ?, 'OB0002', 50.0, 'prenotata')",
-        (volo_id,)
-    )
     conn.commit()
     conn.close()
-    print("  Inserite 2 prenotazioni (pieno)")
+    print(f"  Creato volo OB9999 con id={volo_id} e 2 posti")
 
-    # Tenta una terza prenotazione come mario.rossi (che non ha prenotazioni su OB9999)
-    _login(client, 'mario.rossi', 'password')
+    # Occupa il primo posto: registra ob_test1 e prenota
+    client.post('/api/registrazione', json={
+        'nome': 'Ob', 'cognome': 'Test1', 'documento': 'OBTEST01',
+        'username': 'ob_test1', 'password': 'password1',
+    })
+    _login(client, 'ob_test1', 'password1')
+    client.post('/api/prenota', json={'volo_id': volo_id})
+    print("  Posto 1 occupato da ob_test1")
+
+    # Occupa il secondo posto: registra ob_test2 e prenota
+    client.post('/api/registrazione', json={
+        'nome': 'Ob', 'cognome': 'Test2', 'documento': 'OBTEST02',
+        'username': 'ob_test2', 'password': 'password2',
+    })
+    _login(client, 'ob_test2', 'password2')
+    client.post('/api/prenota', json={'volo_id': volo_id})
+    print("  Posto 2 occupato da ob_test2 (volo pieno)")
+
+    # Tenta una terza prenotazione come mario.rossi (passeggero demo, password 'demo1234')
+    _login(client, 'mario.rossi', 'demo1234')
     r = client.post('/api/prenota', json={'volo_id': volo_id})
     assert r.status_code == 400
     assert 'Volo completo' in r.get_json()['errore']
@@ -250,28 +256,32 @@ def test_checkin_online(client):
       - restituire 200
       - impostare operatore_id = NULL nella carta d'imbarco (non è check-in al banco)
     Il check-in su una prenotazione 'prenotata' deve restituire 400.
+
+    Nota: mario.rossi è il passeggero DEMO (nessuna prenotazione preesistente).
+    Per il test usiamo roberto.galli (passeggero_id=2) che nel seed ha:
+      - prenotazione 1 (GAL001) → volo 3, stato 'prenotata'  (per il caso 400)
+      - prenotazione 3 (GAL003) → volo 5, stato 'pagata' senza carta d'imbarco (per il caso 200)
     """
     print("\n▶ Avvio test_checkin_online")
-    # mario.rossi è il passeggero_id=1 (documento IT00001, crediti 500)
-    _login(client, 'mario.rossi', 'password')
+    _login(client, 'roberto.galli', 'password')
 
-    # Prenotazione 14 (LL7890): mario.rossi, volo 5 (EN7890), stato='pagata', senza CI
-    r = client.post('/api/checkin_online/14')
+    # Prenotazione 3 (GAL003): roberto.galli, volo 5 (AZ3001), stato='pagata', senza CI
+    r = client.post('/api/checkin_online/3')
     assert r.status_code == 200
     assert 'carta_imbarco_id' in r.get_json()
-    print("  Check-in online su prenotazione 14 riuscito")
+    print("  Check-in online su prenotazione 3 riuscito")
 
     # Verifica che operatore_id sia NULL (il check-in online non ha operatore)
     conn = flask_app.get_db()
     riga = conn.execute(
-        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 14"
+        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 3"
     ).fetchone()
     conn.close()
     assert riga is not None
     assert riga['operatore_id'] is None
     print("  Verificato: operatore_id = NULL")
 
-    # Prenotazione 1 (AA1234): mario.rossi, volo 1, stato='prenotata' → non ammesso
+    # Prenotazione 1 (GAL001): roberto.galli, volo 3, stato='prenotata' → non ammesso
     r = client.post('/api/checkin_online/1')
     assert r.status_code == 400
     print("  Check-in online su prenotazione non pagata: 400 (atteso)")
@@ -288,24 +298,34 @@ def test_operatore_checkin(client):
       - restituire 201
       - valorizzare operatore_id nella carta d'imbarco con il proprio utente_id
 
-    mario.rossi (documento IT00001, passeggero_id=1) ha la prenotazione 14 (LL7890)
-    in stato 'pagata' senza carta d'imbarco → unica prenotazione idonea → auto-checkin.
+    Nota: mario.rossi è il passeggero DEMO (nessuna prenotazione preesistente).
+    Per il test usiamo roberto.galli (documento IT00013, passeggero_id=2).
+    Nel seed roberto.galli ha due prenotazioni 'pagata' senza CI (GAL002 e GAL003).
+    Prima eseguiamo il check-in online su GAL003 (prenotazione 3) come roberto.galli,
+    lasciando GAL002 (prenotazione 2) come unica prenotazione idonea per l'auto-checkin
+    al banco.
     """
     print("\n▶ Avvio test_operatore_checkin")
+
+    # Consuma GAL003 con check-in online così resta solo GAL002 pagata senza CI
+    _login(client, 'roberto.galli', 'password')
+    client.post('/api/checkin_online/3')
+    print("  Check-in online su GAL003 eseguito (GAL002 rimane unica prenotazione idonea)")
+
     _login(client, 'operatore1', 'password')
 
-    # mario.rossi (documento IT00001) ha la prenotazione 14 (LL7890) pagata e senza CI
-    r = client.post('/api/operatore/checkin', json={'documento': 'IT00001'})
+    # roberto.galli (documento IT00013) ora ha solo GAL002 (id=2) pagata e senza CI
+    r = client.post('/api/operatore/checkin', json={'documento': 'IT00013'})
     assert r.status_code == 201
-    print("  Check-in al banco per documento IT00001: 201")
+    print("  Check-in al banco per documento IT00013: 201")
 
-    # Verifica che operatore_id sia valorizzato (operatore1 ha utente_id=5 nel seed)
+    # Verifica che operatore_id sia valorizzato (operatore1 ha utente_id=2 nel seed)
     conn = flask_app.get_db()
     riga = conn.execute(
-        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 14"
+        "SELECT operatore_id FROM carte_imbarco WHERE prenotazione_id = 2"
     ).fetchone()
     conn.close()
     assert riga is not None
     assert riga['operatore_id'] is not None
-    print(f"  Verificato: operatore_id = {riga['operatore_id']} (operatore1, id=5)")
+    print(f"  Verificato: operatore_id = {riga['operatore_id']} (operatore1, id=2)")
     print("✔ test_operatore_checkin completato con successo")

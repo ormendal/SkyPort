@@ -234,7 +234,7 @@ a:hover { color: var(--c-sky); }
 /* Volo */
 .badge-programmato { background: var(--c-blue);  color: #fff;            }
 .badge-partito     { background: var(--c-gold);  color: var(--c-navy);   }
-.badge-arrivato    { background: var(--c-muted); color: #fff;            }
+.badge-arrivato    { background: var(--c-success); color: #fff;          }
 
 /* Gate */
 .badge-libero       { background: var(--c-success); color: #fff;            }

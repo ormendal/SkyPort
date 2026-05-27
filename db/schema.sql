@@ -5,11 +5,8 @@
 -- Solo DDL: le tabelle vengono create qui.
 -- I dati di seed vengono inseriti da web/app.py al primo avvio.
 --
--- Questo file è la fonte di verità completa dello schema.
--- Le colonne aggiunte durante lo sviluppo (attivo, prezzo_base, crediti, ecc.)
--- sono ora integrate direttamente nei CREATE TABLE.
--- La funzione _migra_colonne() in web/app.py esiste solo come safety net
--- per i database ripristinati da backup precedenti al consolidamento.
+-- Questo file è l'unica fonte di verità dello schema: tutte le colonne sono
+-- definite direttamente nei CREATE TABLE.
 -- =============================================================================
 
 PRAGMA foreign_keys = ON;
